@@ -137,7 +137,7 @@ jobs:
           echo "$HOME\.dotnet\tools" >> $env:GITHUB_PATH
 
       - name: Install evaluation CLIs
-        uses: $/.github/actions/install-eval-clis
+        uses: $/.github/actions/install-agent-harnesses
 
       # code-review is evaluated through the BC-ALAgents review engine (the real PROD
       # generate half + BCQuality). Check it out only for that category. To evaluate the
