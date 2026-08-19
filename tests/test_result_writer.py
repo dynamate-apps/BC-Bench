@@ -33,6 +33,8 @@ class TestWriteBcevalResults:
 
         assert data["id"] == VALID_INSTANCE_ID
         assert data["metadata"]["model"] == "gpt-4o"
+        # bug-fix is not judge-scored, so no judge model is exported
+        assert "judge_model" not in data["metadata"]
         assert data["metadata"]["prompt_tokens"] == 5000
         assert data["metadata"]["completion_tokens"] == 1200
         assert data["metadata"]["latency"] == 120.5
