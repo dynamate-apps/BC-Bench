@@ -1,5 +1,6 @@
 """Tests for per-article BCQuality coverage of the code-review dataset."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ from bcbench.analysis.bcquality_article_coverage import (
 )
 from bcbench.dataset import CodeReviewEntry, ReviewComment
 from bcbench.dataset.codereview import ArticleId, CodeReviewEntryMetadata
+from bcbench.types import EvaluationCategory
 
 _BASE_COMMIT = "70fd0246a0a4dbc72cb183ca719106722c03be4d"
 
@@ -37,6 +39,17 @@ def _entry(
 
 def _comment(body: str, *articles: ArticleId) -> ReviewComment:
     return ReviewComment(file="src/A.al", line_start=1, body=body, articles=list(articles))
+
+
+def _require_bcquality_root() -> Path:
+    root = resolve_bcquality_root()
+    if root is not None:
+        return root
+
+    message = "BCQUALITY_ROOT must point to a BCQuality checkout to validate article slugs"
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        pytest.fail(message)
+    pytest.skip(message)
 
 
 class TestDeclaredArticles:
@@ -150,3 +163,26 @@ class TestInventoryEnumeration:
     def test_resolve_returns_none_without_source(self, monkeypatch):
         monkeypatch.delenv("BCQUALITY_ROOT", raising=False)
         assert resolve_bcquality_root(None) is None
+
+    def test_missing_root_skips_locally(self, monkeypatch):
+        monkeypatch.delenv("BCQUALITY_ROOT", raising=False)
+        monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+        with pytest.raises(pytest.skip.Exception, match="BCQUALITY_ROOT must point"):
+            _require_bcquality_root()
+
+    def test_missing_root_fails_in_github_actions(self, monkeypatch):
+        monkeypatch.delenv("BCQUALITY_ROOT", raising=False)
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+        with pytest.raises(pytest.fail.Exception, match="BCQUALITY_ROOT must point"):
+            _require_bcquality_root()
+
+
+class TestDatasetArticleSlugs:
+    @pytest.mark.e2e
+    def test_declared_slugs_exist_in_bcquality(self):
+        bcquality_root = _require_bcquality_root()
+        entries = CodeReviewEntry.load(EvaluationCategory.CODE_REVIEW.dataset_path)
+        declared = collect_declared_articles(entries)
+        report = build_coverage_report(entries, inventory=enumerate_inventory(bcquality_root))
+        unknown = {article: declared[article] for article in report.unknown_articles}
+        assert not unknown, f"article slugs not found in {bcquality_root}: {unknown}"
