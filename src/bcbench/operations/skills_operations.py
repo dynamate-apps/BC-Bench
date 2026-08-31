@@ -9,9 +9,13 @@ from bcbench.types import AgentHarness
 logger = get_logger(__name__)
 
 
-def setup_agent_skills(agent_config: dict, entry: BaseDatasetEntry, repo_path: Path, harness: AgentHarness) -> bool:
-    """
-    Setup skills in the repository if available.
+def setup_agent_skills(
+    agent_config: dict,
+    entry: BaseDatasetEntry,
+    repo_path: Path,
+    harness: AgentHarness,
+) -> bool:
+    """Copy skills into the repository when enabled via ``config.yaml``'s ``skills.enabled``.
 
     Returns:
         True if skills were copied, False if skills are disabled.

@@ -3,6 +3,7 @@
 from bcbench.evaluate.base import AgentRunner, EvaluationPipeline
 from bcbench.evaluate.bugfix import BugFixPipeline
 from bcbench.evaluate.codereview import CodeReviewPipeline
+from bcbench.evaluate.dataquery import DataQueryPipeline
 from bcbench.evaluate.ext_request_advisor import ExtRequestAdvisorPipeline
 from bcbench.evaluate.ext_request_implement import ExtRequestImplementPipeline
 from bcbench.evaluate.ext_request_triage import ExtRequestTriagePipeline
@@ -13,6 +14,7 @@ __all__ = [
     "AgentRunner",
     "BugFixPipeline",
     "CodeReviewPipeline",
+    "DataQueryPipeline",
     "EvaluationPipeline",
     "ExtRequestAdvisorPipeline",
     "ExtRequestImplementPipeline",

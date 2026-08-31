@@ -36,6 +36,7 @@ def run_copilot(
     output_dir: OutputDir = _config.paths.evaluation_results_path,
     al_mcp: Annotated[bool, typer.Option("--al-mcp", help="Enable AL MCP server")] = False,
     al_lsp: Annotated[bool, typer.Option("--al-lsp", help="Enable AL LSP server")] = False,
+    bc_mcp: Annotated[bool, typer.Option("--bc-mcp", help="Enable the Business Central MCP server")] = False,
 ) -> None:
     """
     Run GitHub Copilot CLI on a single entry to generate the category output.
@@ -56,6 +57,7 @@ def run_copilot(
         output_dir=output_dir,
         al_mcp=al_mcp if container_name else False,
         al_lsp=al_lsp,
+        bc_mcp=bc_mcp if container_name else False,
         container_name=container_name,
     )
 
@@ -70,6 +72,7 @@ def run_claude(
     output_dir: OutputDir = _config.paths.evaluation_results_path,
     al_mcp: Annotated[bool, typer.Option("--al-mcp", help="Enable AL MCP server")] = False,
     al_lsp: Annotated[bool, typer.Option("--al-lsp", help="Enable AL LSP server")] = False,
+    bc_mcp: Annotated[bool, typer.Option("--bc-mcp", help="Enable the Business Central MCP server")] = False,
 ) -> None:
     """
     Run Claude Code on a single entry to generate the category output.
@@ -90,6 +93,7 @@ def run_claude(
         output_dir=output_dir,
         al_mcp=al_mcp if container_name else False,
         al_lsp=al_lsp,
+        bc_mcp=bc_mcp if container_name else False,
         container_name=container_name,
     )
 

@@ -6,6 +6,7 @@ import pytest
 
 from bcbench.agent.shared.altool_paths import build_assembly_probing_paths as _build_assembly_probing_paths
 from bcbench.agent.shared.mcp import build_mcp_config
+from bcbench.exceptions import AgentError
 from tests.conftest import create_dataset_entry
 
 
@@ -24,6 +25,20 @@ MSLEARN_SERVER = {
     "name": "mslearn",
     "type": "http",
     "url": "https://learn.microsoft.com/api/mcp",
+}
+
+BCMCP_SERVER = {
+    "name": "bcmcp",
+    "type": "http",
+    "url": "",
+    "headers": {},
+}
+
+# A server not gated by any flag, used to assert generic pass-through behavior.
+OTHER_HTTP_SERVER = {
+    "name": "docs",
+    "type": "http",
+    "url": "https://example.com/mcp",
 }
 
 
@@ -68,7 +83,7 @@ class TestAlMcpProjectPaths:
         assert result == (None, None)
 
     def test_altool_excluded_but_other_servers_kept(self, entry, repo_path):
-        config = _make_config(ALTOOL_SERVER, MSLEARN_SERVER)
+        config = _make_config(ALTOOL_SERVER, OTHER_HTTP_SERVER)
 
         config_json, names = build_mcp_config(config, entry, repo_path, al_mcp=False)
         assert config_json is not None
@@ -76,16 +91,63 @@ class TestAlMcpProjectPaths:
 
         parsed = json.loads(config_json)
         assert "altool" not in parsed["mcpServers"]
-        assert "mslearn" in parsed["mcpServers"]
-        assert names == ["mslearn"]
+        assert "docs" in parsed["mcpServers"]
+        assert names == ["docs"]
 
     def test_returns_server_names(self, entry, repo_path):
-        config = _make_config(ALTOOL_SERVER, MSLEARN_SERVER)
+        config = _make_config(ALTOOL_SERVER, OTHER_HTTP_SERVER)
 
         _, names = build_mcp_config(config, entry, repo_path, al_mcp=True)
         assert names is not None
 
-        assert set(names) == {"altool", "mslearn"}
+        assert set(names) == {"altool", "docs"}
+
+
+class TestBcMcp:
+    _GATEWAY_URL = "http://127.0.0.1:54321/BC"
+
+    def test_bcmcp_excluded_when_disabled(self, entry, repo_path):
+        assert build_mcp_config(_make_config(BCMCP_SERVER), entry, repo_path, bc_mcp=False) == (None, None)
+
+    def test_mslearn_included_when_present_in_config(self, entry, repo_path):
+        # mslearn has no dispatch flag anymore: its presence in config.yaml is what enables it.
+        _, servers = build_mcp_config(_make_config(MSLEARN_SERVER), entry, repo_path)
+        assert servers == ["mslearn"]
+
+    def test_mslearn_absent_when_not_in_config(self, entry, repo_path):
+        assert build_mcp_config(_make_config(), entry, repo_path) == (None, None)
+
+    def test_bc_mcp_flag_independent_of_mslearn_presence(self, entry, repo_path):
+        config = _make_config(BCMCP_SERVER, MSLEARN_SERVER)
+
+        # bc-mcp off -> bcmcp excluded, but mslearn stays (config-controlled, no gateway needed)
+        _, bc_off = build_mcp_config(config, entry, repo_path, bc_mcp=False)
+        assert bc_off == ["mslearn"]
+
+        # bc-mcp on -> both present
+        _, both = build_mcp_config(config, entry, repo_path, bc_mcp=True, bc_mcp_gateway_url=self._GATEWAY_URL)
+        assert both is not None
+        assert set(both) == {"bcmcp", "mslearn"}
+
+    def test_mslearn_url_passthrough(self, entry, repo_path):
+        config_json, _ = build_mcp_config(_make_config(MSLEARN_SERVER), entry, repo_path)
+        assert config_json is not None
+        assert json.loads(config_json)["mcpServers"]["mslearn"]["url"] == "https://learn.microsoft.com/api/mcp"
+
+    def test_bcmcp_points_at_gateway_without_credentials(self, entry, repo_path):
+        config_json, _ = build_mcp_config(_make_config(BCMCP_SERVER), entry, repo_path, bc_mcp=True, bc_mcp_gateway_url=self._GATEWAY_URL)
+        assert config_json is not None
+        bcmcp = json.loads(config_json)["mcpServers"]["bcmcp"]
+
+        assert bcmcp["url"] == "http://127.0.0.1:54321/BC/mcp"
+        # The gateway injects auth upstream, so the agent config carries no credentials or headers.
+        assert "headers" not in bcmcp
+        assert "Authorization" not in config_json
+        assert "Basic" not in config_json
+
+    def test_raises_when_gateway_url_missing(self, entry, repo_path):
+        with pytest.raises(AgentError):
+            build_mcp_config(_make_config(BCMCP_SERVER), entry, repo_path, bc_mcp=True)
 
 
 class TestAltoolEnvForwarding:

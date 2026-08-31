@@ -1,13 +1,12 @@
 """GitHub Copilot CLI Agent implementation."""
 
-import os
 import subprocess
 from pathlib import Path
 
 import yaml
 
 from bcbench.agent.copilot.cli import invoke_copilot
-from bcbench.agent.shared import build_al_lsp_plugin, build_mcp_config, build_prompt, resolve_config_plugins
+from bcbench.agent.shared import agent_subprocess_env, build_al_lsp_plugin, build_mcp_config, build_prompt, resolve_config_plugins, start_bc_mcp_gateway
 from bcbench.config import get_config
 from bcbench.dataset import BaseDatasetEntry
 from bcbench.exceptions import AgentError, AgentTimeoutError
@@ -27,6 +26,7 @@ def run_copilot_agent(
     output_dir: Path,
     al_mcp: bool = False,
     al_lsp: bool = False,
+    bc_mcp: bool = False,
     container_name: str = "bcbench",
 ) -> tuple[AgentMetrics | None, ExperimentConfiguration]:
     """Run GitHub Copilot CLI agent on a single dataset entry.
@@ -40,7 +40,16 @@ def run_copilot_agent(
     logger.info(f"Running GitHub Copilot CLI on: {entry.instance_id}")
 
     prompt: str = build_prompt(entry, repo_path, copilot_config, category, al_mcp=al_mcp)
-    mcp_config_json, mcp_server_names = build_mcp_config(copilot_config, entry, repo_path, al_mcp=al_mcp, container_name=container_name)
+    bc_gateway = start_bc_mcp_gateway(bc_mcp)
+    mcp_config_json, mcp_server_names = build_mcp_config(
+        copilot_config,
+        entry,
+        repo_path,
+        al_mcp=al_mcp,
+        bc_mcp=bc_mcp,
+        container_name=container_name,
+        bc_mcp_gateway_url=bc_gateway.base_url if bc_gateway else None,
+    )
     lsp_plugin_dir: Path | None = build_al_lsp_plugin(entry, category, repo_path, AgentHarness.COPILOT, al_lsp=al_lsp, container_name=container_name)
     instructions_enabled: bool = setup_instructions_from_config(copilot_config, entry, repo_path, harness=AgentHarness.COPILOT)
     skills_enabled: bool = setup_agent_skills(copilot_config, entry, repo_path, harness=AgentHarness.COPILOT)
@@ -85,10 +94,11 @@ def run_copilot_agent(
             allow_all_tools=True,
             custom_instructions=instructions_enabled,
             extra_args=extra_args,
-            env={
-                **os.environ,
-                "GITHUB_COPILOT_PROMPT_MODE_WORKSPACE_MCP": "true",
-            },
+            env=agent_subprocess_env(
+                {
+                    "GITHUB_COPILOT_PROMPT_MODE_WORKSPACE_MCP": "true",
+                }
+            ),
         )
         logger.info(f"Copilot CLI run complete for: {entry.instance_id}")
 
@@ -106,3 +116,6 @@ def run_copilot_agent(
         raise
     else:
         return metrics, config
+    finally:
+        if bc_gateway is not None:
+            bc_gateway.stop()
