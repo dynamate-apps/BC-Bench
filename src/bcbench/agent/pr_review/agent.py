@@ -20,6 +20,7 @@ from typing import Any
 
 import yaml
 
+from bcbench.agent.pr_review.metrics import build_pr_review_metrics
 from bcbench.agent.pr_review.review_output import engine_report_to_review_comments, load_engine_report
 from bcbench.config import get_config
 from bcbench.dataset import BaseDatasetEntry
@@ -59,6 +60,10 @@ def _resolve_pwsh() -> str:
     return pwsh
 
 
+def _environment_without_bcquality_overrides() -> dict[str, str]:
+    return {name: value for name, value in os.environ.items() if not name.startswith("BCQUALITY_")}
+
+
 def _commit_patch_as_head(repo_path: Path) -> None:
     """Commit the applied working-tree patch so the engine can diff base..HEAD.
 
@@ -82,24 +87,14 @@ def _prepare_bcquality_root(
     engine_root: Path,
     pwsh: str,
     dest: Path,
-    bcquality_ref: str | None,
-    bcquality_repo: str | None = None,
-    bcquality_local_path: Path | None = None,
 ) -> Path:
-    env = {**os.environ}
-    if bcquality_repo:
-        env["BCQUALITY_REPO"] = bcquality_repo
-    if bcquality_ref:
-        env["BCQUALITY_REF"] = bcquality_ref
     args = [pwsh, "-NoProfile", "-File", str(_PREPARE_BCQUALITY_SCRIPT), "-EngineRoot", str(engine_root), "-Root", str(dest)]
-    if bcquality_local_path:
-        args += ["-LocalPath", str(bcquality_local_path)]
     result = subprocess.run(
         args,
         capture_output=True,
         text=True,
         encoding="utf-8",
-        env=env,
+        env=_environment_without_bcquality_overrides(),
         check=False,
     )
     if result.returncode != 0:
@@ -125,7 +120,9 @@ def _write_review_json(output_dir: Path, repo_path: Path) -> int:
     if outcome == "failed":
         reason = report.get("outcomeReason") or "unknown reason"
         raise AgentError(f"Engine review failed: {reason}")
-    if outcome not in {"completed", "partial", "not-applicable", "no-knowledge"}:
+    if outcome == "not-applicable":
+        raise AgentError("Engine review was not applicable. BC-Bench code-review entries must contain AL changes.")
+    if outcome not in {"completed", "partial", "no-knowledge"}:
         raise AgentError(f"Engine {_FINDINGS_OUTPUT_FILE} has unsupported outcome {outcome!r}.")
     if not isinstance(report.get("findings"), list):
         raise AgentError(f"Engine report in {_FINDINGS_OUTPUT_FILE} has no findings list (got {type(report.get('findings')).__name__}); refusing to score it as a clean review.")
@@ -141,9 +138,6 @@ def run_pr_review_agent(
     repo_path: Path,
     output_dir: Path,
     engine_path: Path | None = None,
-    bcquality_ref: str | None = None,
-    bcquality_repo: str | None = None,
-    bcquality_local_path: Path | None = None,
     min_severity: str | None = None,
 ) -> tuple[AgentMetrics | None, ExperimentConfiguration]:
     """Run the engine's complete local review pipeline and write review.json.
@@ -151,7 +145,7 @@ def run_pr_review_agent(
     Separate from run_copilot_agent by design: this spawns the PROD BC-ALAgents
     PowerShell orchestrator (Copilot is spawned inside the engine, not here), so it
     owns none of the copilot-harness prompt/MCP/LSP wiring and takes engine-specific
-    inputs (BCQuality source, min severity) for the code-review category only.
+    inputs (BC-ALAgents source, min severity) for the code-review category only.
 
     Returns:
         Tuple of (AgentMetrics, ExperimentConfiguration).
@@ -167,26 +161,16 @@ def run_pr_review_agent(
     engine_root = _resolve_pr_review_root(engine_path)
     pwsh = _resolve_pwsh()
     severity = min_severity or settings["min_severity"]
-    bcquality_cfg = settings["bcquality"]
-    bcquality_repo = bcquality_repo or bcquality_cfg["repo"]
-    bcquality_ref = bcquality_ref or bcquality_cfg["ref"]
     output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Running BC-ALAgents review engine on: {entry.instance_id}")
 
     _commit_patch_as_head(repo_path)
     trusted_workspace = _init_trusted_workspace(output_dir / "trusted")
-    bcquality_root = _prepare_bcquality_root(
-        engine_root,
-        pwsh,
-        output_dir / "bcquality",
-        bcquality_ref,
-        bcquality_repo,
-        bcquality_local_path,
-    )
+    bcquality_root = _prepare_bcquality_root(engine_root, pwsh, output_dir / "bcquality")
 
     engine = engine_root / "agents" / "ALReviewAgent" / "scripts" / "Invoke-CopilotPRReview.ps1"
     env = {
-        **os.environ,
+        **_environment_without_bcquality_overrides(),
         "REVIEW_SOURCE": "local",
         "REVIEW_PHASE": "all",
         "BASE_REF": entry.base_commit,
@@ -229,4 +213,4 @@ def run_pr_review_agent(
         logger.exception("Unexpected error running engine review")
         raise
     else:
-        return AgentMetrics(execution_time=time.monotonic() - start), config
+        return build_pr_review_metrics(output_dir, time.monotonic() - start), config

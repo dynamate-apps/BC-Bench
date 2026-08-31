@@ -24,7 +24,7 @@ def _experiment_metadata(experiment: ExperimentConfiguration | None, git_ref: st
     is_experiment: bool = experiment is not None and not experiment.is_empty()
     return {
         "EvalRunType": "experiment" if is_experiment else "baseline",
-        "experiment": experiment.model_dump(mode="json") if (is_experiment and experiment) else None,
+        "experiment": experiment.model_dump(mode="json") if is_experiment and experiment else None,
         "git_branch": git_ref,
         "benchmark_version": benchmark_version,
     }

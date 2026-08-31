@@ -24,18 +24,6 @@ PRReviewEnginePath = Annotated[
     ),
 ]
 
-BCQualityLocalPath = Annotated[
-    Path | None,
-    typer.Option(
-        "--bcquality-local-path",
-        help="Path to a local BCQuality checkout (copied and filtered; never modified)",
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        resolve_path=True,
-    ),
-]
-
 OutputDir = Annotated[Path, typer.Option(help="Directory to save evaluation results", file_okay=False, dir_okay=True)]
 
 RunId = Annotated[str, typer.Option(envvar="GITHUB_RUN_ID", help="Unique identifier for this evaluation run")]

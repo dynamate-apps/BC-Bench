@@ -80,6 +80,8 @@ class AgentMetrics(BaseModel):
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
 
+    total_tokens: int | None = None
+
     # Tool usage statistics from agent logs
     tool_usage: dict[str, int] | None = None
 
@@ -198,8 +200,16 @@ class AgentHarness(StrEnum):
                     completion_tokens=None,
                     tool_usage=None,
                 )
-            case AgentHarness.BCAL | AgentHarness.PR_REVIEW:
+            case AgentHarness.BCAL:
                 expected = AgentMetrics(execution_time=None)
+            case AgentHarness.PR_REVIEW:
+                expected = AgentMetrics(
+                    execution_time=None,
+                    prompt_tokens=None,
+                    completion_tokens=None,
+                    total_tokens=None,
+                    ai_credits=None,
+                )
             case _:
                 raise ValueError(f"Unknown AgentHarness: {self}")
 

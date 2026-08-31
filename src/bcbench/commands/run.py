@@ -6,7 +6,6 @@ import typer
 
 from bcbench.agent import BCalBackendConfig, run_bcal_agent, run_claude_code, run_copilot_agent, run_pr_review_agent
 from bcbench.cli_options import (
-    BCQualityLocalPath,
     ClaudeCodeModel,
     ContainerCompany,
     ContainerMcpUrl,
@@ -127,9 +126,6 @@ def run_pr_review(
     repo_path: RepoPath = _config.paths.testbed_path,
     output_dir: OutputDir = _config.paths.evaluation_results_path,
     engine_path: PRReviewEnginePath = None,
-    bcquality_ref: Annotated[str | None, typer.Option(help="Override the BCQuality ref (defaults to the engine's pinned ref)")] = None,
-    bcquality_repo: Annotated[str | None, typer.Option(help="Override the BCQuality repo, e.g. a private fork (defaults to config/engine)")] = None,
-    bcquality_local_path: BCQualityLocalPath = None,
     min_severity: Annotated[str | None, typer.Option(help="AGENT_MINIMUM_SEVERITY floor (defaults to config)")] = None,
 ) -> None:
     """
@@ -156,9 +152,6 @@ def run_pr_review(
         category=category,
         output_dir=output_dir,
         engine_path=engine_path,
-        bcquality_ref=bcquality_ref,
-        bcquality_repo=bcquality_repo,
-        bcquality_local_path=bcquality_local_path,
         min_severity=min_severity,
     )
 

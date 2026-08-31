@@ -39,7 +39,11 @@ bcbench evaluate claude <entry> --category code-review
 bcbench evaluate pr-review <entry>
 ```
 
-The evaluation workflow pins BC-ALAgents to a commit SHA, and each result records the exact engine revision and filtered BCQuality content. Engine updates require a new BC-Bench version and must record that SHA in the release notes.
+BC-ALAgents is the PR Review harness boundary. Its repo and commit are pinned with the other harnesses in `.github/actions/install-agent-harnesses`, and that engine commit owns the BCQuality version through its own configuration. Engine updates require a new BC-Bench version and must record the BC-ALAgents commit SHA in the release notes.
+
+For an experiment, push the pipeline and/or BCQuality changes through a BC-ALAgents branch, update the action pin to that immutable commit, then run BC-Bench from the corresponding BC-Bench commit. This keeps the reproducible dependency chain BC-Bench -> BC-ALAgents -> BCQuality. A local BC-ALAgents checkout can be supplied with `--engine-path` for smoke testing.
+
+BC PR Review records wall-clock duration, prompt/completion/total tokens, and exact AI credits. Usage values come from the engine's strictly validated schema-v1 `_run-metrics.json`, never from console transcripts. API-call details, knowledge-filter counts, token subcategories, completeness diagnostics, and producer metadata remain in that raw artifact rather than being promoted into BC-Bench result and leaderboard schemas.
 
 ## Baseline Leaderboard
 
@@ -52,6 +56,7 @@ The evaluation workflow pins BC-ALAgents to a commit SHA, and each result record
       <th>Micro F1 (95% CI)</th>
       <th>Precision</th>
       <th>Recall</th>
+      <th>Valid Output</th>
       <th>Avg Time</th>
       <th>Ver</th>
     </tr>
@@ -59,13 +64,14 @@ The evaluation workflow pins BC-ALAgents to a commit SHA, and each result record
   <tbody>
     {% assign sorted_results = site.data.code-review.aggregate | sort: "f1" | reverse %}
     {% for agg in sorted_results %}
-      {% if agg.experiment == null %}
+      {% if agg.experiment == null or agg.experiment.is_experiment == false %}
     <tr>
       <td>{{ agg.agent_name }}</td>
       <td>{{ agg.model }}</td>
       <td>{{ agg.f1 | times: 100.0 | round: 1 }}%{% if agg.f1_ci_low %} ({{ agg.f1_ci_low | times: 100.0 | round: 1 }}-{{ agg.f1_ci_high | times: 100.0 | round: 1 }}%){% endif %}</td>
       <td>{{ agg.precision | times: 100.0 | round: 1 }}%</td>
       <td>{{ agg.recall | times: 100.0 | round: 1 }}%</td>
+      <td>{% if agg.valid_review_output_rate != null %}{{ agg.valid_review_output_rate | times: 100.0 | round: 1 }}%{% else %}—{% endif %}</td>
       <td>{{ agg.average_duration | round: 1 }}s</td>
       <td><a href="https://github.com/microsoft/BC-Bench/releases/tag/v{{ agg.benchmark_version }}" target="_blank">{{ agg.benchmark_version }}</a></td>
     </tr>
@@ -77,13 +83,49 @@ The evaluation workflow pins BC-ALAgents to a commit SHA, and each result record
 <p><em>No results available yet. Check back soon!</em></p>
 {% endif %}
 
+## Performance Leaderboard
+
+{% if site.data.code-review.aggregate and site.data.code-review.aggregate.size > 0 %}
+<table>
+  <thead>
+    <tr>
+      <th>Agent</th>
+      <th>Model</th>
+      <th>Avg Time</th>
+      <th>Avg Prompt Tokens</th>
+      <th>Avg Completion Tokens</th>
+      <th>Avg Total Tokens</th>
+      <th>Avg AI Credits</th>
+      <th>Ver</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% assign performance_results = site.data.code-review.aggregate | sort: "average_duration" %}
+    {% for agg in performance_results %}
+    <tr>
+      <td>{{ agg.agent_name }}</td>
+      <td>{{ agg.model }}</td>
+      <td>{{ agg.average_duration | round: 1 }}s</td>
+      <td>{% if agg.average_prompt_tokens != null %}{{ agg.average_prompt_tokens | round: 0 }}{% else %}—{% endif %}</td>
+      <td>{% if agg.average_completion_tokens != null %}{{ agg.average_completion_tokens | round: 0 }}{% else %}—{% endif %}</td>
+      <td>{% if agg.average_total_tokens != null %}{{ agg.average_total_tokens | round: 0 }}{% else %}—{% endif %}</td>
+      <td>{% if agg.average_ai_credits != null %}{{ agg.average_ai_credits | round: 4 }}{% else %}—{% endif %}</td>
+      <td><a href="https://github.com/microsoft/BC-Bench/releases/tag/v{{ agg.benchmark_version }}" target="_blank">{{ agg.benchmark_version }}</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p><em>No performance results available yet. Check back soon!</em></p>
+{% endif %}
+
 ## Experiment Leaderboard
 
 Compares review-knowledge configurations for the same model (see the Baseline Leaderboard above for the plain agent):
 
 - **Inline knowledge (pre-#8700)** — the review checklists BCApps shipped inline before adopting BCQuality, injected as custom instructions.
 
-{% assign experiment_rows = site.data.code-review.aggregate | where_exp: "agg", "agg.experiment" %}
+{% assign experiment_rows = site.data.code-review.aggregate | where_exp: "agg", "agg.experiment != null and agg.experiment.is_experiment != false" %}
 {% if experiment_rows and experiment_rows.size > 0 %}
 <table>
   <thead>
@@ -95,6 +137,7 @@ Compares review-knowledge configurations for the same model (see the Baseline Le
       <th>Macro F1 (95% CI)</th>
       <th>Precision</th>
       <th>Recall</th>
+      <th>Valid Output</th>
       <th>Avg Time</th>
       <th>Ver</th>
     </tr>
@@ -104,8 +147,7 @@ Compares review-knowledge configurations for the same model (see the Baseline Le
     {% for agg in experiment_results %}
     <tr>
       <td>
-        {%- if agg.experiment.custom_instructions -%}Inline knowledge (pre-#8700)
-        {%- else -%}Other{%- endif -%}
+        {%- if agg.experiment.custom_instructions -%}Inline knowledge (pre-#8700){%- else -%}Other{%- endif -%}
       </td>
       <td>{{ agg.agent_name }}</td>
       <td>{{ agg.model }}</td>
@@ -113,6 +155,7 @@ Compares review-knowledge configurations for the same model (see the Baseline Le
       <td>{{ agg.macro_f1 | times: 100.0 | round: 1 }}%{% if agg.macro_f1_ci_low %} ({{ agg.macro_f1_ci_low | times: 100.0 | round: 1 }}-{{ agg.macro_f1_ci_high | times: 100.0 | round: 1 }}%){% endif %}</td>
       <td>{{ agg.precision | times: 100.0 | round: 1 }}%</td>
       <td>{{ agg.recall | times: 100.0 | round: 1 }}%</td>
+      <td>{% if agg.valid_review_output_rate != null %}{{ agg.valid_review_output_rate | times: 100.0 | round: 1 }}%{% else %}—{% endif %}</td>
       <td>{{ agg.average_duration | round: 1 }}s</td>
       <td><a href="https://github.com/microsoft/BC-Bench/releases/tag/v{{ agg.benchmark_version }}" target="_blank">{{ agg.benchmark_version }}</a></td>
     </tr>

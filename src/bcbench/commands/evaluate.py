@@ -6,7 +6,6 @@ import typer
 
 from bcbench.agent import BCalBackendConfig, run_bcal_agent, run_claude_code, run_copilot_agent, run_pr_review_agent
 from bcbench.cli_options import (
-    BCQualityLocalPath,
     ClaudeCodeModel,
     ContainerCompany,
     ContainerMcpUrl,
@@ -167,9 +166,6 @@ def evaluate_pr_review(
     output_dir: OutputDir = _config.paths.evaluation_results_path,
     run_id: RunId = "pr_review_test_run",
     engine_path: PRReviewEnginePath = None,
-    bcquality_ref: Annotated[str | None, typer.Option(help="Override the BCQuality ref (defaults to the engine's pinned ref)")] = None,
-    bcquality_repo: Annotated[str | None, typer.Option(help="Override the BCQuality repo, e.g. a private fork (defaults to config/engine)")] = None,
-    bcquality_local_path: BCQualityLocalPath = None,
     min_severity: Annotated[str | None, typer.Option(help="AGENT_MINIMUM_SEVERITY floor (defaults to config)")] = None,
 ) -> None:
     """
@@ -178,9 +174,8 @@ def evaluate_pr_review(
     This production-fidelity runner is fixed to the code-review category, while the same
     category can also run through the generic copilot and claude commands for cross-system
     comparison. The resulting review.json is scored by the shared code-review pipeline.
-    Requires a local BC-ALAgents checkout
-    (--engine-path or BC_PR_REVIEW_ROOT), PowerShell 7+, and an authenticated
-    Copilot CLI.
+    Requires a local BC-ALAgents checkout (--engine-path or BC_PR_REVIEW_ROOT),
+    PowerShell 7+, and an authenticated Copilot CLI.
 
     To only generate review.json without scoring, use 'bcbench run pr-review' instead.
     """
@@ -209,9 +204,6 @@ def evaluate_pr_review(
             model=ctx.model,
             output_dir=ctx.result_dir,
             engine_path=engine_path,
-            bcquality_ref=bcquality_ref,
-            bcquality_repo=bcquality_repo,
-            bcquality_local_path=bcquality_local_path,
             min_severity=min_severity,
         ),
     )
