@@ -8,8 +8,12 @@ from bcbench.agent import BCalBackendConfig, run_bcal_agent, run_claude_code, ru
 from bcbench.cli_options import (
     BCQualityLocalPath,
     ClaudeCodeModel,
+    ContainerCompany,
+    ContainerMcpUrl,
     ContainerName,
     ContainerPassword,
+    ContainerServerInstance,
+    ContainerServerUrl,
     ContainerUsername,
     CopilotModel,
     EvaluationCategoryOption,
@@ -40,6 +44,10 @@ def evaluate_copilot(
     container_name: ContainerName = "",
     username: ContainerUsername = "",
     password: ContainerPassword = "",
+    server_url: ContainerServerUrl = "",
+    server_instance: ContainerServerInstance = "",
+    mcp_url: ContainerMcpUrl = None,
+    company: ContainerCompany = None,
     model: CopilotModel = "gpt-5.6-luna",
     repo_path: RepoPath = _config.paths.testbed_path,
     output_dir: OutputDir = _config.paths.evaluation_results_path,
@@ -58,7 +66,7 @@ def evaluate_copilot(
 
     logger.info(f"Running evaluation on entry {entry_id} with GitHub Copilot CLI")
 
-    container = ContainerConfig(name=container_name, username=username, password=password) if container_name else None
+    container = ContainerConfig(container_name, username, password, server_url, server_instance, mcp_url, company) if container_name else None
 
     context = EvaluationContext(
         entry=entry,
@@ -79,10 +87,10 @@ def evaluate_copilot(
             category=category,
             model=ctx.model,
             output_dir=ctx.result_dir,
-            al_mcp=al_mcp if ctx.container else False,
+            al_mcp=al_mcp,
             al_lsp=al_lsp,
-            bc_mcp=bc_mcp if ctx.container else False,
-            container_name=ctx.get_container().name if ctx.container else "",
+            bc_mcp=bc_mcp,
+            container=ctx.container,
         ),
     )
 
@@ -97,6 +105,10 @@ def evaluate_claude_code(
     container_name: ContainerName = "",
     username: ContainerUsername = "",
     password: ContainerPassword = "",
+    server_url: ContainerServerUrl = "",
+    server_instance: ContainerServerInstance = "",
+    mcp_url: ContainerMcpUrl = None,
+    company: ContainerCompany = None,
     model: ClaudeCodeModel = "claude-haiku-4-5",
     repo_path: RepoPath = _config.paths.testbed_path,
     output_dir: OutputDir = _config.paths.evaluation_results_path,
@@ -115,7 +127,7 @@ def evaluate_claude_code(
 
     logger.info(f"Running evaluation on entry {entry_id} with Claude Code")
 
-    container = ContainerConfig(name=container_name, username=username, password=password) if container_name else None
+    container = ContainerConfig(container_name, username, password, server_url, server_instance, mcp_url, company) if container_name else None
 
     context = EvaluationContext(
         entry=entry,
@@ -136,10 +148,10 @@ def evaluate_claude_code(
             category=category,
             model=ctx.model,
             output_dir=ctx.result_dir,
-            al_mcp=al_mcp if ctx.container else False,
+            al_mcp=al_mcp,
             al_lsp=al_lsp,
-            bc_mcp=bc_mcp if ctx.container else False,
-            container_name=ctx.get_container().name if ctx.container else "",
+            bc_mcp=bc_mcp,
+            container=ctx.container,
         ),
     )
 
