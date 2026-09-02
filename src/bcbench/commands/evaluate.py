@@ -20,6 +20,7 @@ from bcbench.cli_options import (
     PRReviewEnginePath,
     RepoPath,
     RunId,
+    resolve_evaluation_runtime,
 )
 from bcbench.config import get_config
 from bcbench.dataset import BaseDatasetEntry, NL2ALEntry
@@ -28,7 +29,7 @@ from bcbench.evaluate.codereview_judge_calibration import run_calibration
 from bcbench.logger import get_logger
 from bcbench.operations import prepare_run_dir
 from bcbench.results import BaseEvaluationResult, CodeReviewResult, ExecutionBasedEvaluationResult, JudgeBasedEvaluationResult
-from bcbench.types import AgentHarness, AgentMetrics, BCalLLMBackend, ContainerConfig, EvaluationCategory, EvaluationContext, ExperimentConfiguration
+from bcbench.types import AgentHarness, AgentMetrics, BCalLLMBackend, EvaluationCategory, EvaluationContext, ExperimentConfiguration
 
 logger = get_logger(__name__)
 _config = get_config()
@@ -46,7 +47,7 @@ def evaluate_copilot(
     server_url: ContainerServerUrl = "",
     server_instance: ContainerServerInstance = "",
     mcp_url: ContainerMcpUrl = None,
-    company: ContainerCompany = None,
+    company: ContainerCompany = "",
     model: CopilotModel = "gpt-5.6-luna",
     repo_path: RepoPath = _config.paths.testbed_path,
     output_dir: OutputDir = _config.paths.evaluation_results_path,
@@ -60,18 +61,29 @@ def evaluate_copilot(
 
     To only run the agent to generate a patch without building/testing, use 'bcbench run copilot' instead.
     """
+    runtime = resolve_evaluation_runtime(
+        category=category,
+        container_name=container_name,
+        username=username,
+        container_password=password,
+        server_url=server_url,
+        server_instance=server_instance,
+        mcp_url=mcp_url,
+        company=company,
+        al_mcp=al_mcp,
+        al_lsp=al_lsp,
+        bc_mcp=bc_mcp,
+    )
     entry = category.entry_class.load(category.dataset_path, entry_id=entry_id)[0]
     run_dir = prepare_run_dir(output_dir, run_id)
 
     logger.info(f"Running evaluation on entry {entry_id} with GitHub Copilot CLI")
 
-    container = ContainerConfig(container_name, username, password, server_url, server_instance, mcp_url, company) if container_name else None
-
     context = EvaluationContext(
         entry=entry,
         repo_path=repo_path,
         result_dir=run_dir,
-        container=container,
+        container=runtime.container if runtime else None,
         model=model,
         agent_name=AgentHarness.COPILOT,
         category=category,
@@ -86,10 +98,7 @@ def evaluate_copilot(
             category=category,
             model=ctx.model,
             output_dir=ctx.result_dir,
-            al_mcp=al_mcp,
-            al_lsp=al_lsp,
-            bc_mcp=bc_mcp,
-            container=ctx.container,
+            runtime=runtime,
         ),
     )
 
@@ -107,7 +116,7 @@ def evaluate_claude_code(
     server_url: ContainerServerUrl = "",
     server_instance: ContainerServerInstance = "",
     mcp_url: ContainerMcpUrl = None,
-    company: ContainerCompany = None,
+    company: ContainerCompany = "",
     model: ClaudeCodeModel = "claude-haiku-4-5",
     repo_path: RepoPath = _config.paths.testbed_path,
     output_dir: OutputDir = _config.paths.evaluation_results_path,
@@ -121,18 +130,29 @@ def evaluate_claude_code(
 
     To only run the agent to generate a patch without building/testing, use 'bcbench run claude' instead.
     """
+    runtime = resolve_evaluation_runtime(
+        category=category,
+        container_name=container_name,
+        username=username,
+        container_password=password,
+        server_url=server_url,
+        server_instance=server_instance,
+        mcp_url=mcp_url,
+        company=company,
+        al_mcp=al_mcp,
+        al_lsp=al_lsp,
+        bc_mcp=bc_mcp,
+    )
     entry = category.entry_class.load(category.dataset_path, entry_id=entry_id)[0]
     run_dir = prepare_run_dir(output_dir, run_id)
 
     logger.info(f"Running evaluation on entry {entry_id} with Claude Code")
 
-    container = ContainerConfig(container_name, username, password, server_url, server_instance, mcp_url, company) if container_name else None
-
     context = EvaluationContext(
         entry=entry,
         repo_path=repo_path,
         result_dir=run_dir,
-        container=container,
+        container=runtime.container if runtime else None,
         model=model,
         agent_name=AgentHarness.CLAUDE,
         category=category,
@@ -147,10 +167,7 @@ def evaluate_claude_code(
             category=category,
             model=ctx.model,
             output_dir=ctx.result_dir,
-            al_mcp=al_mcp,
-            al_lsp=al_lsp,
-            bc_mcp=bc_mcp,
-            container=ctx.container,
+            runtime=runtime,
         ),
     )
 

@@ -525,10 +525,32 @@ class ContainerConfig:
     name: str
     username: str
     password: str
+    company: str
     server_url: str = ""
     server_instance: str = ""
     mcp_url: str | None = None
-    company: str | None = None
+
+    def __post_init__(self) -> None:
+        name = self.name.strip()
+        if not name:
+            raise ValueError("Container name must not be empty")
+        company = self.company.strip()
+        if not company:
+            raise ValueError("Company must not be empty")
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "company", company)
+
+
+@dataclass(frozen=True)
+class AgentRuntimeConfig:
+    container: ContainerConfig
+    al_mcp: bool = False
+    al_lsp: bool = False
+    bc_mcp: bool = False
+
+    def __post_init__(self) -> None:
+        if self.bc_mcp and not self.container.mcp_url:
+            raise ValueError("An MCP URL is required when BC MCP is enabled")
 
 
 @dataclass(frozen=True)

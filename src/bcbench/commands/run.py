@@ -19,11 +19,12 @@ from bcbench.cli_options import (
     OutputDir,
     PRReviewEnginePath,
     RepoPath,
+    resolve_agent_runtime,
 )
 from bcbench.config import get_config
 from bcbench.dataset import NL2ALEntry
 from bcbench.logger import get_logger
-from bcbench.types import BCalLLMBackend, ContainerConfig, EvaluationCategory
+from bcbench.types import BCalLLMBackend, EvaluationCategory
 
 logger = get_logger(__name__)
 _config = get_config()
@@ -41,7 +42,7 @@ def run_copilot(
     server_url: ContainerServerUrl = "",
     server_instance: ContainerServerInstance = "",
     mcp_url: ContainerMcpUrl = None,
-    company: ContainerCompany = None,
+    company: ContainerCompany = "",
     model: CopilotModel = "gpt-5.6-luna",
     repo_path: RepoPath = _config.paths.testbed_path,
     output_dir: OutputDir = _config.paths.evaluation_results_path,
@@ -57,10 +58,20 @@ def run_copilot(
     Example:
         uv run bcbench run copilot microsoft__BCApps-5633 --category bug-fix --repo-path /path/to/BCApps
     """
+    runtime = resolve_agent_runtime(
+        container_name=container_name,
+        username=username,
+        container_password=password,
+        server_url=server_url,
+        server_instance=server_instance,
+        mcp_url=mcp_url,
+        company=company,
+        al_mcp=al_mcp,
+        al_lsp=al_lsp,
+        bc_mcp=bc_mcp,
+    )
     entry = category.entry_class.load(category.dataset_path, entry_id=entry_id)[0]
     category.pipeline.setup_workspace(entry, repo_path)
-
-    container = ContainerConfig(container_name, username, password, server_url, server_instance, mcp_url, company) if container_name else None
 
     run_copilot_agent(
         entry=entry,
@@ -68,10 +79,7 @@ def run_copilot(
         model=model,
         category=category,
         output_dir=output_dir,
-        al_mcp=al_mcp,
-        al_lsp=al_lsp,
-        bc_mcp=bc_mcp,
-        container=container,
+        runtime=runtime,
     )
 
 
@@ -85,7 +93,7 @@ def run_claude(
     server_url: ContainerServerUrl = "",
     server_instance: ContainerServerInstance = "",
     mcp_url: ContainerMcpUrl = None,
-    company: ContainerCompany = None,
+    company: ContainerCompany = "",
     model: ClaudeCodeModel = "claude-haiku-4-5",
     repo_path: RepoPath = _config.paths.testbed_path,
     output_dir: OutputDir = _config.paths.evaluation_results_path,
@@ -101,10 +109,20 @@ def run_claude(
     Example:
         uv run bcbench run claude microsoft__BCApps-5633 --category bug-fix --repo-path /path/to/BCApps
     """
+    runtime = resolve_agent_runtime(
+        container_name=container_name,
+        username=username,
+        container_password=password,
+        server_url=server_url,
+        server_instance=server_instance,
+        mcp_url=mcp_url,
+        company=company,
+        al_mcp=al_mcp,
+        al_lsp=al_lsp,
+        bc_mcp=bc_mcp,
+    )
     entry = category.entry_class.load(category.dataset_path, entry_id=entry_id)[0]
     category.pipeline.setup_workspace(entry, repo_path)
-
-    container = ContainerConfig(container_name, username, password, server_url, server_instance, mcp_url, company) if container_name else None
 
     run_claude_code(
         entry=entry,
@@ -112,10 +130,7 @@ def run_claude(
         model=model,
         category=category,
         output_dir=output_dir,
-        al_mcp=al_mcp,
-        al_lsp=al_lsp,
-        bc_mcp=bc_mcp,
-        container=container,
+        runtime=runtime,
     )
 
 
