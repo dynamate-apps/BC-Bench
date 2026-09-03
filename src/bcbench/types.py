@@ -511,11 +511,11 @@ class EvaluationCategory(StrEnum):
         """
         match self:
             case EvaluationCategory.BUG_FIX | EvaluationCategory.TEST_GENERATION | EvaluationCategory.DATA_QUERY:
-                return "GitHub-BCBench"
+                return "DOCKER001"
             case EvaluationCategory.CODE_REVIEW | EvaluationCategory.EXT_REQUEST_ADVISOR | EvaluationCategory.EXT_REQUEST_IMPLEMENT | EvaluationCategory.EXT_REQUEST_TRIAGE:
-                return "ubuntu-latest"
+                return "DOCKER001"
             case EvaluationCategory.NL2AL:
-                return "windows-latest"
+                return "DOCKER001"
 
         raise ValueError(f"Unknown evaluation category: {self}")
 
