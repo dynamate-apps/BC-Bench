@@ -71,14 +71,13 @@ uv run pre-commit run --all-files
 
 ### Dataset
 
-Replace the dataset tasks with your own, you can keep the ones from `BCApps` as the repository is public. The tasks follow `<organization>__<repo>-<PR#number>`, the `<organization>/<repo>` by default points to GitHub repositories. If your tasks come from Azure DevOps, update the ADO branch in `scripts/BCBenchUtils.psm1` (currently hardcoded to `microsoftinternal`).
+Replace the dataset tasks with your own, you can keep the ones from `BCApps` as the repository is public. The tasks follow `<organization>__<repo>-<PR#number>`, the `<organization>/<repo>` by default points to GitHub repositories.
 
 ### GitHub Actions
 
 The upstream workflows are wired for Microsoft's internal environment. To run them on your fork:
 
 - Replace self-hosted runner label `GitHub-BCBench` with the standard GitHub Action runners.
-- Remove or update GitHub environment `ado-read`, it is used to clone from Azure DevOps.
 - Set repository secrets:
   - `COPILOT_PAT` — GitHub Copilot CLI tokens
   - `ANTHROPIC_API_KEY` — Claude Code API Key

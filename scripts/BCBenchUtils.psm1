@@ -440,7 +440,7 @@ function Update-AppProjectVersion {
 
 <#
 .SYNOPSIS
-    Gets clone information based on the repository type (GitHub or ADO)
+    Gets clone information for the supported GitHub repository
 .PARAMETER Entry
     A DatasetEntry object containing the repo field
 .OUTPUTS
@@ -454,23 +454,14 @@ function Get-RepoCloneInfo {
         [DatasetEntry]$Entry
     )
 
-    [string[]] $repoParts = $Entry.repo -split '/'
-    [bool] $isGitHub = $repoParts[0].ToLower() -ne 'microsoftinternal'
-
-    if ($isGitHub) {
-        return @{
-            Url                 = "https://github.com/$($Entry.repo).git"
-            Token               = $env:GITHUB_TOKEN
-            SparseCheckoutPaths = @()
-        }
+    if ($Entry.repo -ne 'microsoft/BCApps') {
+        throw "Unsupported repository '$($Entry.repo)'. Only microsoft/BCApps is supported."
     }
-    else {
-        # ADO internal NAV repository — sparse-checkout to only include application code
-        return @{
-            Url                 = 'https://dynamicssmb2.visualstudio.com/Dynamics%20SMB/_git/NAV'
-            Token               = $env:ADO_TOKEN
-            SparseCheckoutPaths = @('App/Apps', 'App/Layers')
-        }
+
+    return @{
+        Url                 = "https://github.com/$($Entry.repo).git"
+        Token               = $env:GITHUB_TOKEN
+        SparseCheckoutPaths = @()
     }
 }
 

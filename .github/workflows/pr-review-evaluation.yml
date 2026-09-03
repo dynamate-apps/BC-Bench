@@ -71,12 +71,8 @@ jobs:
     outputs:
       results-dir: ${{ env.EVALUATION_RESULTS_DIR }}
     if: needs.get-entries.outputs.entries != '[]'
-    environment:
-      name: ado-read
-      deployment: false
     permissions:
       contents: read
-      id-token: write
       copilot-requests: write
     name: ${{ matrix.entry }}
     strategy:
@@ -95,8 +91,6 @@ jobs:
         with:
           instance-id: ${{ matrix.entry }}
           category: code-review
-          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           skip-container: true
           skip-repo: false
@@ -140,7 +134,6 @@ jobs:
     uses: $/.github/workflows/summarize-results.yml
     permissions:
       contents: write
-      id-token: write
     with:
       results-dir: ${{ needs.evaluate-with-pr-review.outputs.results-dir }}
       model: ${{ inputs.model }}
