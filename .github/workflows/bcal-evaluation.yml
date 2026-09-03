@@ -164,7 +164,7 @@ jobs:
         if: steps.bccache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          Install-Module -Name BcContainerHelper -Force -AllowClobber -AllowPrerelease
+          Install-Module -Name BcContainerHelper -Scope CurrentUser -Force -AllowClobber -AllowPrerelease
           .\scripts\Download-BCSymbols.ps1 -Category nl2al -InstanceId "${{ matrix.entry }}"
 
       - name: Azure Login (OIDC) for CAPI Key Vault
