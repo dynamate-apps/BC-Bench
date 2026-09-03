@@ -164,7 +164,10 @@ jobs:
         if: steps.bccache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          Install-Module -Name BcContainerHelper -Scope CurrentUser -Force -AllowClobber -AllowPrerelease
+          $modulePath = Join-Path $env:RUNNER_TEMP "bcbench-powershell-modules"
+          New-Item -ItemType Directory -Path $modulePath -Force | Out-Null
+          Save-PSResource -Name BcContainerHelper -Prerelease -Repository PSGallery -Path $modulePath -TrustRepository -Quiet
+          $env:PSModulePath = "$modulePath;$env:PSModulePath"
           .\scripts\Download-BCSymbols.ps1 -Category nl2al -InstanceId "${{ matrix.entry }}"
 
       - name: Azure Login (OIDC) for CAPI Key Vault

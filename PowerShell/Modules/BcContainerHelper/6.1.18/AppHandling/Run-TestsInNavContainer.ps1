@@ -1,0 +1,825 @@
+﻿<# 
+ .Synopsis
+  Run a test suite in a NAV/BC Container
+ .Description
+ .Parameter containerName
+  Name of the container in which you want to run a test suite
+ .Parameter tenant
+  tenant to use if container is multitenant
+ .Parameter companyName
+  company to use
+ .Parameter profile
+  profile to use
+ .Parameter credential
+  Credentials of the SUPER user if using NavUserPassword authentication
+ .Parameter sqlcredential
+  SQL Credential if using an external sql server
+ .Parameter accesstoken
+  If your container is running AAD authentication, you need to specify an accesstoken for the user specified in credential
+ .Parameter testSuite
+  Name of test suite to run. Default is DEFAULT.
+ .Parameter testGroup
+  Only supported in 14.x containers or older. Name of test group to run. Wildcards (? and *) are supported. Default is *.
+ .Parameter testCodeunit
+  Name or ID of test codeunit to run. Wildcards (? and *) are supported. Default is *.
+  This parameter will not populate the test suite with the specified codeunit. This is used as a filter on the tests that are already present
+  (or otherwise loaded) in the suite.
+  This is not to be confused with -testCodeunitRange.
+ .Parameter testCodeunitRange
+  A BC-compatible filter string to use for loading test codeunits (similar to -extensionId). This is not to be confused with -testCodeunit.
+  If you set this parameter to '*', all test codeunits will be loaded.
+  This might not work on all versions of BC and only works when using the command-line-testtool.
+ .Parameter testFunction
+  Name of test function to run. Wildcards (? and *) are supported. Default is *.
+ .Parameter ExtensionId
+  Specifying an extensionId causes the test tool to run all tests in the app with this app id.\
+ .PARAMETER requiredTestIsolation
+  Specify the required test isolation level. This is used to filter the tests that are run.
+ .Parameter testType
+  Specify the type of tests to run. This is used to filter the tests that are run.
+ .Parameter appName
+  The app name of then extension with id extensionId.
+ .Parameter TestRunnerCodeunitId
+  Specifying a TestRunnerCodeunitId causes the test tool to switch to this test runner.
+ .Parameter XUnitResultFileName
+  Filename where the function should place an XUnit compatible result file
+ .Parameter AppendToXUnitResultFile
+  Specify this switch if you want the function to append to the XUnit compatible result file instead of overwriting it
+ .Parameter JUnitResultFileName
+  Filename where the function should place an JUnit compatible result file
+ .Parameter AppendToJUnitResultFile
+  Specify this switch if you want the function to append to the JUnit compatible result file instead of overwriting it
+ .Parameter ReRun
+  Specify this switch if you want the function to replace an existing test run (of the same test codeunit) in the test result file instead of adding it
+ .Parameter AzureDevOps
+  Generate Azure DevOps Pipeline compatible output. This setting determines the severity of errors.
+ .Parameter GitHubActions
+  Generate GitHub Actions compatible output. This setting determines the severity of errors.
+ .Parameter detailed
+  Include this switch to output success/failure information for all tests.
+ .Parameter InteractionTimeout
+  Timespan allowed for a single interaction (Running a test codeunit is an interaction). Default is 24 hours.
+ .Parameter ReturnTrueIfAllPassed
+  Specify this switch if the function should return true/false on whether all tests passes. If not specified, the function returns nothing.
+ .Parameter testPage
+  ID of the test page to use. Default for 15.x containers is 130455. Default for 14.x containers and earlier is 130409.
+ .Parameter culture
+  Set the culture when running the tests. Default is en-US. Microsoft tests are written for en-US.
+ .Parameter timezone
+  Set the timezone when running the tests. Default is current timezone.
+ .Parameter debugMode
+  Include this switch to output debug information if running the tests fails.
+ .Parameter usePublicWebBaseUrl
+  Connect to the public Url and not to localhost
+ .Parameter disabledTests
+  DisabledTests is an array of disabled tests. Example: @( @{ "codeunitName" = "name"; "method" = "*" } )
+  If you have the disabledTests in a file, you need to convert the file to Json: -disabledTests (Get-Content $filename | ConvertFrom-Json)
+ .Parameter bcAuthContext
+  Authorization Context created by New-BcAuthContext. By specifying BcAuthContext and environment, the function will run tests on the online Business Central Environment specified
+ .Parameter environment
+  Environment to use for the running tests
+ .Parameter restartContainerAndRetry
+  Include this switch to restart container and retry the operation (everything) on non-recoverable errors.
+  This is NOT test failures, but more things like out of memory, communication errors or that kind.
+ .Parameter connectFromHost
+  Run the Test Runner PS functions on the host connecting to the public Web BaseUrl to allow web debuggers like fiddler to trace connections
+ .Example
+  Run-TestsInBcContainer -containerName test -credential $credential
+ .Example
+  Run-TestsInBcContainer -containerName $containername -credential $credential -XUnitResultFileName "c:\ProgramData\BcContainerHelper\$containername.results.xml" -AzureDevOps "warning"
+ .Example
+  Run-TestsInBcContainer -containerName $containername -credential $credential -JUnitResultFileName "c:\ProgramData\BcContainerHelper\$containername.results.xml" -GitHubActions "warning"
+#>
+function Run-TestsInBcContainer {
+    Param (
+        [string] $containerName = '',
+        [string] $compilerFolder = '',
+        [Parameter(Mandatory=$false)]
+        [string] $tenant = "default",
+        [Parameter(Mandatory=$false)]
+        [string] $companyName = "",
+        [Parameter(Mandatory=$false)]
+        [string] $profile = "",
+        [Parameter(Mandatory=$false)]
+        [PSCredential] $credential = $null,
+        [Parameter(Mandatory=$false)]
+        [PSCredential] $sqlCredential = $credential,
+        [Parameter(Mandatory=$false)]
+        [string] $accessToken = "",
+        [Parameter(Mandatory=$false)]
+        [string] $testSuite = "DEFAULT",
+        [Parameter(Mandatory=$false)]
+        [string] $testGroup = "*",
+        [Parameter(Mandatory=$false)]
+        [string] $testCodeunit = "*",
+        [Parameter(Mandatory=$false)]
+        [string] $testCodeunitRange = "",
+        [Parameter(Mandatory=$false)]
+        [string] $testFunction = "*",
+        [string] $extensionId = "",
+        [Parameter(Mandatory=$false)]
+        [string] $requiredTestIsolation = "",
+        [Parameter(Mandatory=$false)]
+        [string] $testType = "",
+        [string] $appName = "",
+        [string] $testRunnerCodeunitId = "",
+        [array]  $disabledTests = @(),
+        [Parameter(Mandatory=$false)]
+        [string] $XUnitResultFileName,
+        [switch] $AppendToXUnitResultFile,
+        [string] $JUnitResultFileName,
+        [switch] $AppendToJUnitResultFile,
+        [switch] $ReRun,
+        [ValidateSet('no','error','warning')]
+        [string] $AzureDevOps = 'no',
+        [ValidateSet('no','error','warning')]
+        [string] $GitHubActions = 'no',
+        [switch] $detailed,
+        [timespan] $interactionTimeout = [timespan]::FromHours(24),
+        [switch] $returnTrueIfAllPassed,
+        [Parameter(Mandatory=$false)]
+        [int] $testPage,
+        [string] $culture = "en-US",
+        [string] $timezone = "",
+        [switch] $debugMode = $bcContainerHelperConfig.debugMode,
+        [switch] $restartContainerAndRetry,
+        [switch] $usePublicWebBaseUrl,
+        [string] $useUrl = "",
+        [switch] $connectFromHost,
+        [Hashtable] $bcAuthContext,
+        [string] $environment,
+        [switch] $renewClientContextBetweenTests = $bcContainerHelperConfig.renewClientContextBetweenTests
+    )
+
+$telemetryScope = InitTelemetryScope -name $MyInvocation.InvocationName -parameterValues $PSBoundParameters -includeParameters @()
+try {
+
+    if ($compilerFolder -and -not $containerName) {
+        Write-Host "Using CompilerFolder without Container"
+        $customConfig = $null
+        $symbolsFolder = Join-Path $compilerFolder "symbols"
+        $baseAppFile = GetSymbolFiles -path $symbolsFolder -baseName 'Microsoft_Base Application' | Select-Object -First 1
+        $baseAppInfo = Get-AppJsonFromAppFile -appFile $baseAppFile.FullName
+
+        $version = [Version]$baseAppInfo.version
+        $PsTestToolFolder = Join-Path ([System.IO.Path]::GetTempPath()) "$([Guid]::NewGuid().ToString())"
+        New-Item $PsTestToolFolder -ItemType Directory | Out-Null
+        $testDlls = Join-Path $compilerFolder "dlls/Test Assemblies/*.dll"
+        Copy-Item $testDlls -Destination $PsTestToolFolder -Force
+        Copy-Item -Path (Join-Path $PSScriptRoot "PsTestFunctions.ps1") -Destination $PsTestToolFolder -Force
+        Copy-Item -Path (Join-Path $PSScriptRoot "ClientContext.ps1") -Destination $PsTestToolFolder -Force
+        $connectFromHost = $true
+    }
+    else {
+        if (-not $containerName) {
+            $containerName = $bcContainerHelperConfig.defaultContainerName
+        }
+        Write-Host "Using Container"
+        $customConfig = Get-BcContainerServerConfiguration -ContainerName $containerName
+        $navversion = Get-BcContainerNavversion -containerOrImageName $containerName
+        $version = [System.Version]($navversion.split('-')[0])
+        $PsTestToolFolder = Join-Path $bcContainerHelperConfig.hostHelperFolder "Extensions\$containerName\PsTestTool"
+    }
+
+    if ($bcAuthContext -and $environment) {
+        if ($environment -like 'https://*' -or $environment -like 'http://*') {
+            $useUrl = $environment
+            if ($bcAuthContext.ContainsKey('Username') -and $bcAuthContext.ContainsKey('Password')) {
+                $credential = New-Object System.Management.Automation.PSCredential -ArgumentList $bcAuthContext.Username, $bcAuthContext.Password
+                $clientServicesCredentialType = "NavUserPassword"
+            }
+            if ($bcAuthContext.ContainsKey('ClientServicesCredentialType')) {
+                $clientServicesCredentialType = $bcAuthContext.ClientServicesCredentialType
+            }
+            $testPage = 130455
+        }
+        else {
+            $response = Invoke-RestMethod -Method Get -Uri "$($bcContainerHelperConfig.baseUrl.TrimEnd('/'))/$($bcAuthContext.tenantID)/$environment/deployment/url"
+            if($response.status -ne 'Ready') {
+                throw "environment not ready, status is $($response.status)"
+            }
+            $useUrl = $response.data
+            if ($testPage) {
+                throw "You cannot specify testPage when running tests in an Online tenant"
+            }
+            $testPage = 130455
+        }
+        $uri = [Uri]::new($useUrl)
+        $useUrl = $useUrl.Split('?')[0]
+        $dict = [System.Web.HttpUtility]::ParseQueryString($uri.Query)
+        if ($dict['tenant']) { $tenant = $dict['tenant'] }
+        if ($dict['testpage']) { $testpage = [int]$dict['testpage'] }
+    }
+    else {
+        $clientServicesCredentialType = $customConfig.ClientServicesCredentialType
+
+        $useTraefik = $false
+        $inspect = docker inspect $containerName | ConvertFrom-Json
+        if ($inspect.Config.Labels.psobject.Properties.Match('traefik.enable').Count -gt 0) {
+            if ($inspect.config.Labels.'traefik.enable' -eq "true") {
+                $usePublicWebBaseUrl = ($useUrl -eq "")
+                $useTraefik = $true
+            }
+        }
+        if ($usePublicWebBaseUrl -and $useUrl -ne "") {
+            throw "You cannot specify usePublicWebBaseUrl and useUrl at the same time"
+        }
+
+        if ($customConfig.PublicWebBaseUrl -eq "") {
+            throw "Container $containerName needs to include the WebClient in order to run tests (PublicWebBaseUrl is blank)"
+        }
+
+        if ($useUrl -eq "") {
+            if ([bool]($customConfig.PSobject.Properties.name -eq "EnableTaskScheduler")) {
+                if ($customConfig.EnableTaskScheduler -eq "True") {
+                    Write-Host -ForegroundColor Red "WARNING: TaskScheduler is running in the container, this can lead to test failures. Specify -EnableTaskScheduler:`$false to disable Task Scheduler."
+                }
+            }
+        }
+        if (!$testPage) {
+            if ($version.Major -ge 15) {
+                $testPage = 130455
+            }
+            else {
+                $testPage = 130409
+            }
+        }
+
+        if ($clientServicesCredentialType -eq "Windows" -and "$CompanyName" -eq "") {
+            $myName = $myUserName.SubString($myUserName.IndexOf('\')+1)
+            Get-BcContainerBcUser -containerName $containerName | Where-Object { $_.UserName.EndsWith("\$MyName", [System.StringComparison]::InvariantCultureIgnoreCase) -or $_.UserName -eq $myName } | % {
+                $companyName = $_.Company
+            }
+        }
+    
+        Invoke-ScriptInBCContainer -containerName $containerName -scriptBlock { Param($timeoutStr)
+            $webConfigFile = "C:\inetpub\wwwroot\$WebServerInstance\web.config"
+            try {
+                $webConfig = [xml](Get-Content $webConfigFile)
+                $node = $webConfig.configuration.'system.webServer'.aspNetCore.Attributes.GetNamedItem('requestTimeout')
+                if (!($node)) {
+                    $node = $webConfig.configuration.'system.webServer'.aspNetCore.Attributes.Append($webConfig.CreateAttribute('requestTimeout'))
+                }
+                if ($node.Value -ne $timeoutStr) {
+                    $node.Value = $timeoutStr
+                    $webConfig.Save($webConfigFile)
+                }
+            }
+            catch {
+                Write-Host "WARNING: could not set requestTimeout in web.config"
+            }
+        } -argumentList $interactionTimeout.ToString()
+    }
+
+    if ($bcAuthContext -and !($environment -like 'https://*' -or $environment -like 'http://*')) {
+        if ($bcAuthContext.scopes -notlike "https://projectmadeira.com/*") {
+            Write-Host -ForegroundColor Red "WARNING: AuthContext.Scopes is '$($bcAuthContext.Scopes)', should have been 'https://projectmaderia.com/'"
+        }
+        $bcAuthContext = Renew-BcAuthContext $bcAuthContext
+        $accessToken = $bcAuthContext.accessToken
+        $credential = New-Object pscredential -ArgumentList $bcAuthContext.upn, (ConvertTo-SecureString -String $accessToken -AsPlainText -Force)
+    }
+
+    $PsTestFunctionsPath = Join-Path $PsTestToolFolder "PsTestFunctions.ps1"
+    $ClientContextPath = Join-Path $PsTestToolFolder "ClientContext.ps1"
+    $fobfile = Join-Path $PsTestToolFolder "PSTestToolPage.fob"
+
+    if ($testPage -eq 130455) {
+        if ($testgroup -ne "*" -and $testgroup -ne "") {
+            Write-Host -ForegroundColor Red "WARNING: TestGroups are not supported in Business Central 15.x and later"
+        }
+    }
+
+    If (!(Test-Path -Path $PsTestToolFolder -PathType Container)) {
+        try {
+            New-Item -Path $PsTestToolFolder -ItemType Directory | Out-Null
+    
+            Copy-Item -Path (Join-Path $PSScriptRoot "PsTestFunctions.ps1") -Destination $PsTestFunctionsPath -Force
+            Copy-Item -Path (Join-Path $PSScriptRoot "ClientContext.ps1") -Destination $ClientContextPath -Force
+
+            if ($version.Major -ge 15) {
+                if ($testPage -eq 130409) {
+                    Publish-BcContainerApp -containerName $containerName -appFile (Join-Path $PSScriptRoot "Microsoft_PSTestToolPage_15.0.0.0.app") -skipVerification -sync -install
+                }
+            }
+            else {
+                if ($version.Major -lt 11) {
+                    Copy-Item -Path (Join-Path $PSScriptRoot "PSTestToolPage$($version.Major).fob") -Destination $fobfile -Force
+                }
+                else {
+                    Copy-Item -Path (Join-Path $PSScriptRoot "PSTestToolPage.fob") -Destination $fobfile -Force
+                }
+
+                if ($clientServicesCredentialType -eq "Windows") {
+                    Import-ObjectsToNavContainer -containerName $containerName -objectsFile $fobfile
+                } else {
+                    Import-ObjectsToNavContainer -containerName $containerName -objectsFile $fobfile -sqlCredential $sqlCredential
+                }
+            }
+        } catch {
+            Remove-Item -Path $PsTestToolFolder -Recurse -Force
+            throw
+        }
+    }
+
+    while ($true) {
+        try
+        {
+            if ($connectFromHost) {
+                if ($PSVersionTable.PSVersion.Major -lt 7) {
+                    throw "Using ConnectFromHost requires PowerShell 7"
+                }
+                $newtonSoftDllPath = Join-Path $PsTestToolFolder "Newtonsoft.Json.dll"
+                $clientDllPath = Join-Path $PsTestToolFolder "Microsoft.Dynamics.Framework.UI.Client.dll"
+                if ($containerName) {
+                    if (!((Test-Path $newtonSoftDllPath) -and (Test-Path $clientDllPath))) {
+                        Invoke-ScriptInBcContainer -containerName $containerName { Param([string] $myNewtonSoftDllPath, [string] $myClientDllPath)
+                            if (!(Test-Path $myNewtonSoftDllPath)) {
+                                $newtonSoftDllPath = "C:\Program Files\Microsoft Dynamics NAV\*\Service\Management\Newtonsoft.Json.dll"
+                                if (!(Test-Path $newtonSoftDllPath)) {
+                                    $newtonSoftDllPath = "C:\Program Files\Microsoft Dynamics NAV\*\Service\Newtonsoft.Json.dll"
+                                }
+                                $newtonSoftDllPath = (Get-Item $newtonSoftDllPath).FullName
+                                Copy-Item -Path $newtonSoftDllPath -Destination $myNewtonSoftDllPath
+                            }
+                            $clientDllPath = "C:\Test Assemblies\Microsoft.Dynamics.Framework.UI.Client.dll"
+                            if (!(Test-Path $myClientDllPath)) {
+                                Copy-Item -Path $clientDllPath -Destination $myClientDllPath
+                                $antiSSRFdll = Join-Path ([System.IO.Path]::GetDirectoryName($clientDllPath)) 'Microsoft.Internal.AntiSSRF.dll'
+                                if (Test-Path $antiSSRFdll) {
+                                    Copy-Item -Path $antiSSRFdll -Destination ([System.IO.Path]::GetDirectoryName($myClientDllPath))
+                                }
+                            }
+                        } -argumentList $newtonSoftDllPath, $clientDllPath
+                    }
+                }
+    
+                if ($useUrl) {
+                    $publicWebBaseUrl = $useUrl.TrimEnd('/')
+                }
+                else {
+                    $publicWebBaseUrl = $customConfig.PublicWebBaseUrl.TrimEnd('/')
+                }
+                $serviceUrl = "$publicWebBaseUrl/cs?tenant=$tenant"
+    
+                if ($accessToken) {
+                    $clientServicesCredentialType = "AAD"
+                    $credential = New-Object pscredential $credential.UserName, (ConvertTo-SecureString -String $accessToken -AsPlainText -Force)
+                }
+        
+                if ($companyName) {
+                    $serviceUrl += "&company=$([Uri]::EscapeDataString($companyName))"
+                }
+
+                if ($profile) {
+                    $serviceUrl += "&profile=$([Uri]::EscapeDataString($profile))"
+                }
+    
+                . $PsTestFunctionsPath -newtonSoftDllPath $newtonSoftDllPath -clientDllPath $clientDllPath -clientContextScriptPath $ClientContextPath
+        
+                Write-Host "Connecting to $serviceUrl"
+                $clientContext = $null
+                try {
+                    $clientContext = New-ClientContext -serviceUrl $serviceUrl -auth $clientServicesCredentialType -credential $credential -interactionTimeout $interactionTimeout -culture $culture -timezone $timezone -debugMode:$debugMode
+
+                    $Param = @{}
+                    if ($renewClientContextBetweenTests) {
+                        $Param = @{ "renewClientContext" = { 
+                                if ($renewClientContextBetweenTests) {
+                                    Write-Host "Renewing Client Context"
+                                    Remove-ClientContext -clientContext $clientContext
+                                    $clientContext = $null
+                                    $clientContext = New-ClientContext -serviceUrl $serviceUrl -auth $clientServicesCredentialType -credential $credential -interactionTimeout $interactionTimeout -culture $culture -timezone $timezone -debugMode:$debugMode
+                                    Write-Host "Client Context renewed"
+                                }
+                                $clientContext
+                            }
+                        }
+                    }
+
+                    $result = Run-Tests @Param -clientContext $clientContext `
+                              -TestSuite $testSuite `
+                              -TestGroup $testGroup `
+                              -TestCodeunit $testCodeunit `
+                              -TestCodeunitRange $testCodeunitRange `
+                              -TestFunction $testFunction `
+                              -ExtensionId $extensionId `
+                              -RequiredTestIsolation $requiredTestIsolation `
+                              -TestType $testType `
+                              -appName $appName `
+                              -TestRunnerCodeunitId $testRunnerCodeunitId `
+                              -DisabledTests $disabledtests `
+                              -XUnitResultFileName $XUnitResultFileName `
+                              -AppendToXUnitResultFile:$AppendToXUnitResultFile `
+                              -JUnitResultFileName $JUnitResultFileName `
+                              -AppendToJUnitResultFile:$AppendToJUnitResultFile `
+                              -ReRun:$ReRun `
+                              -AzureDevOps $AzureDevOps `
+                              -GitHubActions $GitHubActions `
+                              -detailed:$detailed `
+                              -debugMode:$debugMode `
+                              -testPage $testPage `
+                              -connectFromHost:$connectFromHost
+                }
+                catch {
+                    Write-Host $_.ScriptStackTrace
+                    throw
+                }
+                finally {
+                    if ($clientContext) {
+                        Remove-ClientContext -clientContext $clientContext
+                    }
+                }
+            }
+            else {
+                $containerXUnitResultFileName = ""
+                if ($XUnitResultFileName) {
+                    $containerXUnitResultFileName = Get-BcContainerPath -containerName $containerName -path $XUnitResultFileName
+                    if ("$containerXUnitResultFileName" -eq "") {
+                        throw "The path for XUnitResultFileName ($XUnitResultFileName) is not shared with the container."
+                    }
+                }
+
+                $containerJUnitResultFileName = ""
+                if ($JUnitResultFileName) {
+                    $containerJUnitResultFileName = Get-BcContainerPath -containerName $containerName -path $JUnitResultFileName
+                    if ("$containerJUnitResultFileName" -eq "") {
+                        throw "The path for JUnitResultFileName ($JUnitResultFileName) is not shared with the container."
+                    }
+                }
+
+                $result = Invoke-ScriptInBcContainer -containerName $containerName -usePwsh ($version.Major -ge 26) -scriptBlock { Param([string] $tenant, [string] $companyName, [string] $profile, [System.Management.Automation.PSCredential] $credential, [string] $accessToken, [string] $testSuite, [string] $testGroup, [string] $testCodeunit, [string] $testCodeunitRange, [string] $testFunction, [string] $PsTestFunctionsPath, [string] $ClientContextPath, [string] $XUnitResultFileName, [bool] $AppendToXUnitResultFile, [string] $JUnitResultFileName, [bool] $AppendToJUnitResultFile, [bool] $ReRun, [string] $AzureDevOps, [string] $GitHubActions, [bool] $detailed, [timespan] $interactionTimeout, $testPage, $version, $culture, $timezone, $debugMode, $usePublicWebBaseUrl, $useUrl, $extensionId, $requiredTestIsolation, $testType, $appName, $testRunnerCodeunitId, $disabledtests, $renewClientContextBetweenTests)
+    
+                    $newtonSoftDllPath = "C:\Program Files\Microsoft Dynamics NAV\*\Service\Management\Newtonsoft.Json.dll"
+                    if (!(Test-Path $newtonSoftDllPath)) {
+                        $newtonSoftDllPath = "C:\Program Files\Microsoft Dynamics NAV\*\Service\Newtonsoft.Json.dll"
+                    }
+                    $newtonSoftDllPath = (Get-Item $newtonSoftDllPath).FullName
+                    $clientDllPath = "C:\Test Assemblies\Microsoft.Dynamics.Framework.UI.Client.dll"
+                    $customConfigFile = Join-Path (Get-Item "C:\Program Files\Microsoft Dynamics NAV\*\Service").FullName "CustomSettings.config"
+                    [xml]$customConfig = [System.IO.File]::ReadAllText($customConfigFile)
+                    $publicWebBaseUrl = $customConfig.SelectSingleNode("//appSettings/add[@key='PublicWebBaseUrl']").Value.TrimEnd('/')
+                    $clientServicesCredentialType = $customConfig.SelectSingleNode("//appSettings/add[@key='ClientServicesCredentialType']").Value
+                
+                    if ($useUrl) {
+                        $serviceUrl = "$($useUrl.TrimEnd('/'))/cs?tenant=$tenant"
+                    }
+                    elseif ($usePublicWebBaseUrl) {
+                        $serviceUrl = "$publicWebBaseUrl/cs?tenant=$tenant"
+                    } 
+                    else {
+                        $uri = [Uri]::new($publicWebBaseUrl)
+                        $serviceUrl = "$($Uri.Scheme)://localhost:$($Uri.Port)$($Uri.PathAndQuery)/cs?tenant=$tenant"
+                    }
+            
+                    if ($accessToken) {
+                        $clientServicesCredentialType = "AAD"
+                        $credential = New-Object pscredential $credential.UserName, (ConvertTo-SecureString -String $accessToken -AsPlainText -Force)
+                    }
+                    elseif ($clientServicesCredentialType -eq "Windows") {
+                        $windowsUserName = whoami
+                        $allUsers = @(Get-NAVServerUser -ServerInstance $ServerInstance -tenant $tenant -ErrorAction Ignore)
+                        if ($allUsers.count -gt 0) {
+                            $NavServerUser = $allUsers | Where-Object { $_.UserName -eq $windowsusername }
+                            if (!($NavServerUser)) {
+                                Write-Host "Creating $windowsusername as user"
+                                New-NavServerUser -ServerInstance $ServerInstance -tenant $tenant -WindowsAccount $windowsusername
+                                New-NavServerUserPermissionSet -ServerInstance $ServerInstance -tenant $tenant -WindowsAccount $windowsusername -PermissionSetId SUPER
+                            }
+                        }
+                    }
+            
+                    if ($companyName) {
+                        $serviceUrl += "&company=$([Uri]::EscapeDataString($companyName))"
+                    }
+
+                    if ($profile) {
+                        $serviceUrl += "&profile=$([Uri]::EscapeDataString($profile))"
+                    }
+
+                    . $PsTestFunctionsPath -newtonSoftDllPath $newtonSoftDllPath -clientDllPath $clientDllPath -clientContextScriptPath $ClientContextPath
+
+                    Write-Host "Connecting to $serviceUrl"
+                    $clientContext = $null
+                    try {
+
+                        Disable-SslVerification
+
+                        $clientContext = New-ClientContext -serviceUrl $serviceUrl -auth $clientServicesCredentialType -credential $credential -interactionTimeout $interactionTimeout -culture $culture -timezone $timezone -debugMode:$debugMode
+
+                        $Param = @{}
+                        if ($renewClientContextBetweenTests) {
+                            $Param = @{ "renewClientContext" = { 
+                                    if ($renewClientContextBetweenTests) {
+                                        Write-Host "Renewing Client Context"
+                                        Remove-ClientContext -clientContext $clientContext
+                                        $clientContext = $null
+                                        $clientContext = New-ClientContext -serviceUrl $serviceUrl -auth $clientServicesCredentialType -credential $credential -interactionTimeout $interactionTimeout -culture $culture -timezone $timezone -debugMode:$debugMode
+                                        Write-Host "Client Context renewed"
+                                    }
+                                    $clientContext
+                                }
+                            }
+                        }
+
+                        Run-Tests @Param -clientContext $clientContext `
+                                  -TestSuite $testSuite `
+                                  -TestGroup $testGroup `
+                                  -TestCodeunit $testCodeunit `
+                                  -TestCodeunitRange $testCodeunitRange `
+                                  -TestFunction $testFunction `
+                                  -ExtensionId $extensionId `
+                                  -RequiredTestIsolation $requiredTestIsolation `
+                                  -TestType $testType `
+                                  -appName $appName `
+                                  -TestRunnerCodeunitId $testRunnerCodeunitId `
+                                  -DisabledTests $disabledtests `
+                                  -XUnitResultFileName $XUnitResultFileName `
+                                  -AppendToXUnitResultFile:$AppendToXUnitResultFile `
+                                  -JUnitResultFileName $JUnitResultFileName `
+                                  -AppendToJUnitResultFile:$AppendToJUnitResultFile `
+                                  -ReRun:$ReRun `
+                                  -AzureDevOps $AzureDevOps `
+                                  -GitHubActions $GitHubActions `
+                                  -detailed:$detailed `
+                                  -debugMode:$debugMode `
+                                  -testPage $testPage `
+                                  -connectFromHost:$connectFromHost
+                    }
+                    catch {
+                        Write-Host $_.ScriptStackTrace
+                        throw
+                    }
+                    finally {
+                        Enable-SslVerification
+                        if ($clientContext) {
+                            Remove-ClientContext -clientContext $clientContext
+                            $clientContext = $null
+                        }
+                    }
+            
+                } -argumentList $tenant, $companyName, $profile, $credential, $accessToken, $testSuite, $testGroup, $testCodeunit, $testCodeunitRange, $testFunction, (Get-BcContainerPath -containerName $containerName -Path $PsTestFunctionsPath), (Get-BCContainerPath -containerName $containerName -path $ClientContextPath), $containerXUnitResultFileName, $AppendToXUnitResultFile, $containerJUnitResultFileName, $AppendToJUnitResultFile, $ReRun, $AzureDevOps, $GitHubActions, $detailed, $interactionTimeout, $testPage, $version, $culture, $timezone, $debugMode, $usePublicWebBaseUrl, $useUrl, $extensionId, $requiredTestIsolation, $testType, $appName, $testRunnerCodeunitId, $disabledtests, $renewClientContextBetweenTests.IsPresent
+            }
+            if ($result -is [array]) {
+                0..($result.Count-2) | % { Write-Host $result[$_] }
+                $allPassed = $result[$result.Count-1]
+            }
+            else {
+                $allPassed = $result
+            }
+
+            if ($returnTrueIfAllPassed) {
+                $allPassed
+            }
+            if (!$allPassed -and $containerName) {
+                Remove-BcContainerSession -containerName $containerName
+            }
+            break
+        }
+        catch {
+            $rethrow = $true
+            if ($containerName) {
+                Remove-BcContainerSession $containerName
+                if ($restartContainerAndRetry) {
+                    Write-Host -ForegroundColor Red $_.Exception.Message
+                    Restart-BcContainer $containerName
+                    if ($useTraefik) {
+                        Write-Host "Waiting for 30 seconds to allow Traefik to pickup restarted container"
+                        Start-Sleep -Seconds 30
+                    }
+                    $restartContainerAndRetry = $false
+                    $rethrow = $false
+                }
+            }
+            if ($rethrow) {
+                if ($debugMode) {
+                    Write-host $_.ScriptStackTrace
+                }
+                throw $_.Exception.Message
+            }
+        }
+    }
+}
+catch {
+    TrackException -telemetryScope $telemetryScope -errorRecord $_
+    throw
+}
+finally {
+    TrackTrace -telemetryScope $telemetryScope
+}
+}
+Set-Alias -Name Run-TestsInNavContainer -Value Run-TestsInBcContainer
+Export-ModuleMember -Function Run-TestsInBcContainer -Alias Run-TestsInNavContainer
+
+# SIG # Begin signature block
+# MIInSQYJKoZIhvcNAQcCoIInOjCCJzYCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC1eenvi1oUtcBI
+# Jm0GswZxu20NDYyNevSeg0jW88OFoqCCDLowggX1MIID3aADAgECAhMzAAACHU0Z
+# yE7XD1dIAAAAAAIdMA0GCSqGSIb3DQEBCwUAMFcxCzAJBgNVBAYTAlVTMR4wHAYD
+# VQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKDAmBgNVBAMTH01pY3Jvc29mdCBD
+# b2RlIFNpZ25pbmcgUENBIDIwMjQwHhcNMjYwNDE2MTg1OTQzWhcNMjcwNDE1MTg1
+# OTQzWjB0MQswCQYDVQQGEwJVUzETMBEGA1UECBMKV2FzaGluZ3RvbjEQMA4GA1UE
+# BxMHUmVkbW9uZDEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBvcmF0aW9uMR4wHAYD
+# VQQDExVNaWNyb3NvZnQgQ29ycG9yYXRpb24wggEiMA0GCSqGSIb3DQEBAQUAA4IB
+# DwAwggEKAoIBAQDQvewXxx9gZZFC6Ys1WBay8BJ8kGA4JQnH5CMafqOASlTpK9H8
+# o5ZXTXt0caVQTNMUPt445wXYD+dFtaKWTwDn1I52oUSrC9vJin1Gsqt+zyKJL5Dg
+# 3eQXbQNR61DmMy20GLTIO3SFed9Rfi/ophgCLGFLDR3r0KvHjwMb/jYWS0celV/4
+# Lz27LfAekm8v9E5IXaeiXbAUYZKK090n4CVl3JBtbN+9DtI9SNu/yjvozW52/u7R
+# X/Ttpa/KDlpuokZ+Zcbvmtd9ur9gFLvZzh41o9MsE/clQtdaFWGvuo6Jua/ntpgk
+# ey3E5/vBFe+MJPG6phdnuo6r57ZudCudiI1bAgMBAAGjggGbMIIBlzAOBgNVHQ8B
+# Af8EBAMCB4AwHwYDVR0lBBgwFgYKKwYBBAGCN0wIAQYIKwYBBQUHAwMwHQYDVR0O
+# BBYEFH6QuMwqcPG0hQlQ6c5jCtTTLrVeMEUGA1UdEQQ+MDykOjA4MR4wHAYDVQQL
+# ExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xFjAUBgNVBAUTDTIzMDAxMis1MDc1NTkw
+# HwYDVR0jBBgwFoAUf1k/VCHarU/vBeXmo9ctBpQSCDEwYAYDVR0fBFkwVzBVoFOg
+# UYZPaHR0cDovL3d3dy5taWNyb3NvZnQuY29tL3BraW9wcy9jcmwvTWljcm9zb2Z0
+# JTIwQ29kZSUyMFNpZ25pbmclMjBQQ0ElMjAyMDI0LmNybDBtBggrBgEFBQcBAQRh
+# MF8wXQYIKwYBBQUHMAKGUWh0dHA6Ly93d3cubWljcm9zb2Z0LmNvbS9wa2lvcHMv
+# Y2VydHMvTWljcm9zb2Z0JTIwQ29kZSUyMFNpZ25pbmclMjBQQ0ElMjAyMDI0LmNy
+# dDAMBgNVHRMBAf8EAjAAMA0GCSqGSIb3DQEBCwUAA4ICAQBKTbYOjzwTG/DXGaz9
+# s6+fQeaTtDcFmMY+5UyVFCyj7Pv+5i37qfX8lSL/tBIfYQfWsMuBQlfZurJD6r4H
+# VJ2CeH+1fgiq8dcHdVKoZ3Sa2qXoX3cq9iS8cVb06B7+5/XJ7I0OxHH9fDsvJ3T3
+# w5V/ZtAIFmLrl+P0CtG+92uzRsn0nTbdFjOkLMLWPLAU3THohKRlSEMgFJpPkm5n
+# 5UAZ35xX6FWCrDLsSKb555bTifwa8mJBwdlof0bmfYidH+dxZ1FdDxvLnNl9zeKs
+# A4kejaaIqqIPguhwAti5Ql7BlTNoJNwxCvBmqW2MQLnCkYN/VVUsR3V2x/rcTNzo
+# Bf/Z/SpROvdaA2ZOOd1uioXJt3tdLQ7vHpqpib0KfWr/FWXW10q38VxfCnRQBqzb
+# SuztR7nEMuzX7Ck+B/XaPDXd1qh72+QYyB0Z2VzWmO9zsnb9Uq/dwu8LGeQqnyu6
+# 7SDGACvnXii2fb9+US492VTnXSnFKyqwgzUyFMtZK1/sHYTv6bG4TtQUygQxTN+Z
+# V+aJIlKO2MqZ7bKrAnOzS9m6NgoTdWOq11bTOZwKlIEV/EhV9SWkDmdpR/hPPT2v
+# 6TEj4F8PT/zHjRezIU5c/DGlt/VhY/pK0XkJtEyMmmS1BMtjU/rqBZVMIm3dnxQs
+# /TBByr+Cf8Z1r7aifQVQ+WSqzjCCBr0wggSloAMCAQICEzMAAAA5O7Y3Gb8GHWcA
+# AAAAADkwDQYJKoZIhvcNAQEMBQAwgYgxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpX
+# YXNoaW5ndG9uMRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQg
+# Q29ycG9yYXRpb24xMjAwBgNVBAMTKU1pY3Jvc29mdCBSb290IENlcnRpZmljYXRl
+# IEF1dGhvcml0eSAyMDExMB4XDTI0MDgwODIwNTQxOFoXDTM2MDMyMjIyMTMwNFow
+# VzELMAkGA1UEBhMCVVMxHjAcBgNVBAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlvbjEo
+# MCYGA1UEAxMfTWljcm9zb2Z0IENvZGUgU2lnbmluZyBQQ0EgMjAyNDCCAiIwDQYJ
+# KoZIhvcNAQEBBQADggIPADCCAgoCggIBANgBnB7jOMeqlRYHNa265v4IY9fH8TKh
+# emHfPINe1gpLaV3dhg324WwH06LcHbpnsBukCDNitryo0dtS/EW6I/yEL/bLSY8h
+# KpbfQuWusBPr9qazYcDxCW/qnjb5JsI1s8bNOg3bVATvQVL4tcf03aTycsz8QeCd
+# M0l/yHRObJ9QqazM1r6VPEOJ7LL+uEEb73w6QCuhs89a1uv1zerOYMnsneRRwCbp
+# yW11IcggU0cRKDDq1pjVJzIbIF6+oiXXbReOsgeI8zu1FyQfK0fVkaya8SmVHQ/t
+# Of23mZ4W9k0Ri22QW9p3UgSC5OUDktKxxcCmGL6tXLfOGSWHIIV4YrTJTT6PNty5
+# REojHJuZHArkF9VnHTERWoTjAzfI3kP+5b4alUdhgAZ7ttOu1bVnXfHaqPYl2rPs
+# 20ji03LOVWsh/radgE17es5hL+t6lV0eVHrVhsssROWJuz2MXMCt7iw7lFPG9LXK
+# Gjsmonn2gotGdHIuEg5JnJMJVmixd5LRlkmgYRZKzhxSCwyoGIq0PhaA7Y+VPct5
+# pCHkijcIIDm0nlkK+0KyepolcqGm0T/GYQRMhHJlGOOmVQop36wUVUYklUy++vDW
+# eEgEo4s7hxN6mIbf2MSIQ/iIfMZgJxC69oukMUXCrOC3SkE/xIkgpfl22MM1itkZ
+# 35nNXkMolU1lAgMBAAGjggFOMIIBSjAOBgNVHQ8BAf8EBAMCAYYwEAYJKwYBBAGC
+# NxUBBAMCAQAwHQYDVR0OBBYEFH9ZP1Qh2q1P7wXl5qPXLQaUEggxMBkGCSsGAQQB
+# gjcUAgQMHgoAUwB1AGIAQwBBMA8GA1UdEwEB/wQFMAMBAf8wHwYDVR0jBBgwFoAU
+# ci06AjGQQ7kUBU7h6qfHMdEjiTQwWgYDVR0fBFMwUTBPoE2gS4ZJaHR0cDovL2Ny
+# bC5taWNyb3NvZnQuY29tL3BraS9jcmwvcHJvZHVjdHMvTWljUm9vQ2VyQXV0MjAx
+# MV8yMDExXzAzXzIyLmNybDBeBggrBgEFBQcBAQRSMFAwTgYIKwYBBQUHMAKGQmh0
+# dHA6Ly93d3cubWljcm9zb2Z0LmNvbS9wa2kvY2VydHMvTWljUm9vQ2VyQXV0MjAx
+# MV8yMDExXzAzXzIyLmNydDANBgkqhkiG9w0BAQwFAAOCAgEAFJQfOChP7onn6fLI
+# MKrSlN1WYKwDFgAddymOUO3FrM8d7B/W/iQ6DxXsDn7D5W4wMwYeLystcEqfkjz4
+# NURRgazyMu5yRzQh4LqjA4tStTcJh1opExo7nn5PuPBYnbu0+THSuVHTe0VTTPVh
+# ily/piFrDo3axQ9P4C+Ol5yet+2gTfekICS5xS+cYfSIvgn0JksVBVMYVI5QFu/q
+# hnLhsEFEUzG8fvv0hjgkO+lkpV9ty6GkN4vdnd7ya6Q6aR9y34aiM1qmxaxBi6OU
+# nyNl6fkuun/diTFnYDLTppOkr/mg5WSfCiDVMNCxtj4wPKC5OmHm1DQIt/MNokbb
+# H3UGsFP1QbzsLocuSqLCvH09Io3fDPTmscR9Y75G4qX7RTX8AdBPo0I6OEojf39z
+# uFZt0qOHm65YWQE69cZM2ueE1MB05dNNgHK9gTE7zKvK/fg8B2qjW88MT/WF5V5u
+# vZGtqa9FSL2RazArA+rDPuf6JGYz4HpgMZHB4S6szWSKYBv0VisCzfxgeU+dquXW
+# 9bd0auYlOB58DPcOYKdc3Se94g+xL4pcEhbB54JOgAkwYTu/9dLeH2pDqeJZAABV
+# DWRQCaXfO5LgyKwKCLYXpigrZYCjUSBcr+Ve8PFWMhVTQl0v4q8J/AUmQN5W4n10
+# 1cY2L4A7GTQG1h32HHAvfQESWP0xghnlMIIZ4QIBATBuMFcxCzAJBgNVBAYTAlVT
+# MR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKDAmBgNVBAMTH01pY3Jv
+# c29mdCBDb2RlIFNpZ25pbmcgUENBIDIwMjQCEzMAAAIdTRnITtcPV0gAAAAAAh0w
+# DQYJYIZIAWUDBAIBBQCgga4wGQYJKoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYK
+# KwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZIhvcNAQkEMSIEIPp6W02t
+# 9DBTNI7n8IrsOWpEE+Lh1+khMeHQlu7vk1uiMEIGCisGAQQBgjcCAQwxNDAyoBSA
+# EgBNAGkAYwByAG8AcwBvAGYAdKEagBhodHRwOi8vd3d3Lm1pY3Jvc29mdC5jb20w
+# DQYJKoZIhvcNAQEBBQAEggEAxvo0IdOj03IXlHaJWpMR8D9St/P/VnQRLvCxbOkJ
+# 2oi83FnXAd+ITWduxLSwZO/rhO696vX9MCkvRGm5yWBiykvOd5FmWB3NyaZz/4Il
+# nSYHNaoPBK3bnQAAO9SsfL1yTacFI3+ETk6WfjnFdciEGb/i29Rdy49AFkAizv+e
+# 8P7G+FX1I96R8QXjsISwvne1bxI7LDGTn6wRwS+bVpHKhdA/kZMBljyecFYN5IWY
+# BMwaRYm+wKwBzS2+yNA01TQWovG8k0+3cojP2B+IxrQ4h/fD9PGUZTUDzZxWTDtP
+# AtgRL1zLHhvqwj5ZXgOxDSIXGhvEjW80cn+mDLg1YLTlWaGCF5cwgheTBgorBgEE
+# AYI3AwMBMYIXgzCCF38GCSqGSIb3DQEHAqCCF3AwghdsAgEDMQ8wDQYJYIZIAWUD
+# BAIBBQAwggFSBgsqhkiG9w0BCRABBKCCAUEEggE9MIIBOQIBAQYKKwYBBAGEWQoD
+# ATAxMA0GCWCGSAFlAwQCAQUABCCHuapzVebuB3xa7R7kKU5ZbU/G0oyyBd6LfyUe
+# f2VF6QIGaoSS9aqzGBMyMDI2MDgyNzA2MjkzNS45NjJaMASAAgH0oIHRpIHOMIHL
+# MQswCQYDVQQGEwJVUzETMBEGA1UECBMKV2FzaGluZ3RvbjEQMA4GA1UEBxMHUmVk
+# bW9uZDEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBvcmF0aW9uMSUwIwYDVQQLExxN
+# aWNyb3NvZnQgQW1lcmljYSBPcGVyYXRpb25zMScwJQYDVQQLEx5uU2hpZWxkIFRT
+# UyBFU046QTAwMC0wNUUwLUQ5NDcxJTAjBgNVBAMTHE1pY3Jvc29mdCBUaW1lLVN0
+# YW1wIFNlcnZpY2WgghHtMIIHIDCCBQigAwIBAgITMwAAAiu7AFD/TTuaoQABAAAC
+# KzANBgkqhkiG9w0BAQsFADB8MQswCQYDVQQGEwJVUzETMBEGA1UECBMKV2FzaGlu
+# Z3RvbjEQMA4GA1UEBxMHUmVkbW9uZDEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBv
+# cmF0aW9uMSYwJAYDVQQDEx1NaWNyb3NvZnQgVGltZS1TdGFtcCBQQ0EgMjAxMDAe
+# Fw0yNjAyMTkxOTQwMTFaFw0yNzA1MTcxOTQwMTFaMIHLMQswCQYDVQQGEwJVUzET
+# MBEGA1UECBMKV2FzaGluZ3RvbjEQMA4GA1UEBxMHUmVkbW9uZDEeMBwGA1UEChMV
+# TWljcm9zb2Z0IENvcnBvcmF0aW9uMSUwIwYDVQQLExxNaWNyb3NvZnQgQW1lcmlj
+# YSBPcGVyYXRpb25zMScwJQYDVQQLEx5uU2hpZWxkIFRTUyBFU046QTAwMC0wNUUw
+# LUQ5NDcxJTAjBgNVBAMTHE1pY3Jvc29mdCBUaW1lLVN0YW1wIFNlcnZpY2UwggIi
+# MA0GCSqGSIb3DQEBAQUAA4ICDwAwggIKAoICAQCX3mi6OD3syUqQm4QqgkrKPbcs
+# K/Qx3fYctL8+VM1uOY3booi5GxwauTgQf6JFHITToxS7gjqKlK8OFLzL6UTl0jxE
+# K5t6DuOcgJXdvutimoTlOS0C3kyITXBAXoj/gp6hRR9z6WRip1Ktkilb3dJXCjQq
+# T9P2Cuujr+Vz8r+Z+jDl09ji/ic/4G34r3mVwjs//Gnx9Pu31V8rXFicNiAzxpub
+# awpbd8pqfzlWT2vnG3kF9l6MiREbvJ3XHLUwHQsh0t/TrSFx/s/yCqpJWYJ6oClG
+# 70tvsFH0aRP8wB4cP/CFa2ILvk26i3OcJBl+pqKjHTSBy9mvwTPEDlnzco0Nt8R6
+# pSPTXZgBsscHhoKfC0WQmOzY2keXbAmRTcZMyXz5v/AJbmoI0y07Bazvt5NkXddG
+# 9TErQWwtsFyIKrElDgWfHeCoTu1wu2ciD3dK72z3ca2gzoEDxT2j9BXIUKaiTzTd
+# QPRsAMaO3dU0zaGwMMlwtSJyDh14YEgZoUu5vS8MugMqdrNjphyL65yKhjpAWbhY
+# kIHO/0uZju95tP8zZNqXIRh4tdfWHJPATn9r+cxkyuh2x0VLdfx1lmK9X3NjH0Nt
+# gAs5JB/wOlkyuudxmFTfWVyRrL37ispOZ8aPAFgvyR6cNTkGpkFo35JRjciNmZiU
+# 4qT9Uty+V5gudFk1jwIDAQABo4IBSTCCAUUwHQYDVR0OBBYEFD4WjuQTUJbtbd3j
+# mvZku0FZ2eU2MB8GA1UdIwQYMBaAFJ+nFV0AXmJdg/Tl0mWnG1M1GelyMF8GA1Ud
+# HwRYMFYwVKBSoFCGTmh0dHA6Ly93d3cubWljcm9zb2Z0LmNvbS9wa2lvcHMvY3Js
+# L01pY3Jvc29mdCUyMFRpbWUtU3RhbXAlMjBQQ0ElMjAyMDEwKDEpLmNybDBsBggr
+# BgEFBQcBAQRgMF4wXAYIKwYBBQUHMAKGUGh0dHA6Ly93d3cubWljcm9zb2Z0LmNv
+# bS9wa2lvcHMvY2VydHMvTWljcm9zb2Z0JTIwVGltZS1TdGFtcCUyMFBDQSUyMDIw
+# MTAoMSkuY3J0MAwGA1UdEwEB/wQCMAAwFgYDVR0lAQH/BAwwCgYIKwYBBQUHAwgw
+# DgYDVR0PAQH/BAQDAgeAMA0GCSqGSIb3DQEBCwUAA4ICAQDO/CKsciEM8kr1fqH4
+# TlfT66ENoTjxXw810pyEq0PdrgLwfgT3x+1gz7CQHtUdevqMQ5qHyDLhm6pT911C
+# YkGN+6g+MU7fMYTr6d3SxieJwBIoWkfR4g7SitGzMKU465KEYejfddoUgovC/xcR
+# paALO5p3/A248ByhJiMttBQNDtsT/HaCFwRFCURby/f8c1kky8F8xkCXFz+/MtZ5
+# d1lWFjwOI2geZHWq9XihDOgee5nS2koo5V6n8XG220UTevVf+pgmpIH71XKDVIYT
+# GGZJs6yPlfJ2aXqw1ME4NR6okNsY3P1M31H6DMYRfJGNBNep595kXGh3YzA3cCiy
+# g+jmJ58h/fTvjngIpuUFfODpDjFx0ic1YoLANxhCF3RhS9qYM7K40NEhKshYuaAk
+# IG2XBKYig3r/0/b0sjvjBws55AYonMm3A8qcX/6k9Vfc0mv9dtonHuWGfA2b+qE2
+# qpCnhzGbdDHq7iOSZEw01nNupAMf1c41k9IoTQ2z3iw6w4ZZoLOyg4TKMbp1krpT
+# 4trip/y30Cv5khyqCDNqaXQpBkOYON8LgtoQ3amVOX7ix5jdrnx/vUxTUSigXvrW
+# dL7Uk8kpmS0zto2Toy7aT5oBzCTvfj9iJ/BN/E1vhFBkhJCvZ7PVvsMSnTTmkx2F
+# al2lVkztuAI44fD/uyLJdaMQSzCCB3EwggVZoAMCAQICEzMAAAAVxedrngKbSZkA
+# AAAAABUwDQYJKoZIhvcNAQELBQAwgYgxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpX
+# YXNoaW5ndG9uMRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQg
+# Q29ycG9yYXRpb24xMjAwBgNVBAMTKU1pY3Jvc29mdCBSb290IENlcnRpZmljYXRl
+# IEF1dGhvcml0eSAyMDEwMB4XDTIxMDkzMDE4MjIyNVoXDTMwMDkzMDE4MzIyNVow
+# fDELMAkGA1UEBhMCVVMxEzARBgNVBAgTCldhc2hpbmd0b24xEDAOBgNVBAcTB1Jl
+# ZG1vbmQxHjAcBgNVBAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlvbjEmMCQGA1UEAxMd
+# TWljcm9zb2Z0IFRpbWUtU3RhbXAgUENBIDIwMTAwggIiMA0GCSqGSIb3DQEBAQUA
+# A4ICDwAwggIKAoICAQDk4aZM57RyIQt5osvXJHm9DtWC0/3unAcH0qlsTnXIyjVX
+# 9gF/bErg4r25PhdgM/9cT8dm95VTcVrifkpa/rg2Z4VGIwy1jRPPdzLAEBjoYH1q
+# UoNEt6aORmsHFPPFdvWGUNzBRMhxXFExN6AKOG6N7dcP2CZTfDlhAnrEqv1yaa8d
+# q6z2Nr41JmTamDu6GnszrYBbfowQHJ1S/rboYiXcag/PXfT+jlPP1uyFVk3v3byN
+# pOORj7I5LFGc6XBpDco2LXCOMcg1KL3jtIckw+DJj361VI/c+gVVmG1oO5pGve2k
+# rnopN6zL64NF50ZuyjLVwIYwXE8s4mKyzbnijYjklqwBSru+cakXW2dg3viSkR4d
+# Pf0gz3N9QZpGdc3EXzTdEonW/aUgfX782Z5F37ZyL9t9X4C626p+Nuw2TPYrbqgS
+# Uei/BQOj0XOmTTd0lBw0gg/wEPK3Rxjtp+iZfD9M269ewvPV2HM9Q07BMzlMjgK8
+# QmguEOqEUUbi0b1qGFphAXPKZ6Je1yh2AuIzGHLXpyDwwvoSCtdjbwzJNmSLW6Cm
+# gyFdXzB0kZSU2LlQ+QuJYfM2BjUYhEfb3BvR/bLUHMVr9lxSUV0S2yW6r1AFemzF
+# ER1y7435UsSFF5PAPBXbGjfHCBUYP3irRbb1Hode2o+eFnJpxq57t7c+auIurQID
+# AQABo4IB3TCCAdkwEgYJKwYBBAGCNxUBBAUCAwEAATAjBgkrBgEEAYI3FQIEFgQU
+# KqdS/mTEmr6CkTxGNSnPEP8vBO4wHQYDVR0OBBYEFJ+nFV0AXmJdg/Tl0mWnG1M1
+# GelyMFwGA1UdIARVMFMwUQYMKwYBBAGCN0yDfQEBMEEwPwYIKwYBBQUHAgEWM2h0
+# dHA6Ly93d3cubWljcm9zb2Z0LmNvbS9wa2lvcHMvRG9jcy9SZXBvc2l0b3J5Lmh0
+# bTATBgNVHSUEDDAKBggrBgEFBQcDCDAZBgkrBgEEAYI3FAIEDB4KAFMAdQBiAEMA
+# QTALBgNVHQ8EBAMCAYYwDwYDVR0TAQH/BAUwAwEB/zAfBgNVHSMEGDAWgBTV9lbL
+# j+iiXGJo0T2UkFvXzpoYxDBWBgNVHR8ETzBNMEugSaBHhkVodHRwOi8vY3JsLm1p
+# Y3Jvc29mdC5jb20vcGtpL2NybC9wcm9kdWN0cy9NaWNSb29DZXJBdXRfMjAxMC0w
+# Ni0yMy5jcmwwWgYIKwYBBQUHAQEETjBMMEoGCCsGAQUFBzAChj5odHRwOi8vd3d3
+# Lm1pY3Jvc29mdC5jb20vcGtpL2NlcnRzL01pY1Jvb0NlckF1dF8yMDEwLTA2LTIz
+# LmNydDANBgkqhkiG9w0BAQsFAAOCAgEAnVV9/Cqt4SwfZwExJFvhnnJL/Klv6lwU
+# tj5OR2R4sQaTlz0xM7U518JxNj/aZGx80HU5bbsPMeTCj/ts0aGUGCLu6WZnOlNN
+# 3Zi6th542DYunKmCVgADsAW+iehp4LoJ7nvfam++Kctu2D9IdQHZGN5tggz1bSNU
+# 5HhTdSRXud2f8449xvNo32X2pFaq95W2KFUn0CS9QKC/GbYSEhFdPSfgQJY4rPf5
+# KYnDvBewVIVCs/wMnosZiefwC2qBwoEZQhlSdYo2wh3DYXMuLGt7bj8sCXgU6ZGy
+# qVvfSaN0DLzskYDSPeZKPmY7T7uG+jIa2Zb0j/aRAfbOxnT99kxybxCrdTDFNLB6
+# 2FD+CljdQDzHVG2dY3RILLFORy3BFARxv2T5JL5zbcqOCb2zAVdJVGTZc9d/HltE
+# AY5aGZFrDZ+kKNxnGSgkujhLmm77IVRrakURR6nxt67I6IleT53S0Ex2tVdUCbFp
+# AUR+fKFhbHP+CrvsQWY9af3LwUFJfn6Tvsv4O+S3Fb+0zj6lMVGEvL8CwYKiexcd
+# FYmNcP7ntdAoGokLjzbaukz5m/8K6TT4JDVnK+ANuOaMmdbhIurwJ0I9JZTmdHRb
+# atGePu1+oDEzfbzL6Xu/OHBE0ZDxyKs6ijoIYn/ZcGNTTY3ugm2lBRDBcQZqELQd
+# VTNYs6FwZvKhggNQMIICOAIBATCB+aGB0aSBzjCByzELMAkGA1UEBhMCVVMxEzAR
+# BgNVBAgTCldhc2hpbmd0b24xEDAOBgNVBAcTB1JlZG1vbmQxHjAcBgNVBAoTFU1p
+# Y3Jvc29mdCBDb3Jwb3JhdGlvbjElMCMGA1UECxMcTWljcm9zb2Z0IEFtZXJpY2Eg
+# T3BlcmF0aW9uczEnMCUGA1UECxMeblNoaWVsZCBUU1MgRVNOOkEwMDAtMDVFMC1E
+# OTQ3MSUwIwYDVQQDExxNaWNyb3NvZnQgVGltZS1TdGFtcCBTZXJ2aWNloiMKAQEw
+# BwYFKw4DAhoDFQAJrD90ykHpo/0AGb7lmwvsCtqROaCBgzCBgKR+MHwxCzAJBgNV
+# BAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9uMRAwDgYDVQQHEwdSZWRtb25kMR4w
+# HAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xJjAkBgNVBAMTHU1pY3Jvc29m
+# dCBUaW1lLVN0YW1wIFBDQSAyMDEwMA0GCSqGSIb3DQEBCwUAAgUA7jpEzzAiGA8y
+# MDI2MDgyNzA1MDgzMVoYDzIwMjYwODI4MDUwODMxWjB3MD0GCisGAQQBhFkKBAEx
+# LzAtMAoCBQDuOkTPAgEAMAoCAQACAgViAgH/MAcCAQACAhKRMAoCBQDuO5ZPAgEA
+# MDYGCisGAQQBhFkKBAIxKDAmMAwGCisGAQQBhFkKAwKgCjAIAgEAAgMHoSChCjAI
+# AgEAAgMBhqAwDQYJKoZIhvcNAQELBQADggEBAA3gPX0/PBc8/0CVxjljfurwnCYA
+# oJ7HVEyMGqBGRbYlGmx9mz+y2w2HEw07pDznusdpGBX0gq6qkxkUN53IFinvZgn5
+# JM5MZrR24hnXWMzn3v1fCDmZ9D36W1fJIM/r8SkvNev2i+lJn6W5+GvWZRe0rNJx
+# VW11NlML3mghte1h/QKUakBK3BB/RNP3XL87tYhCNeGWqP01aFcbSqJigpIUX76D
+# YQ0Iwu0M6GrgAIlB+4WeCxwZyrsw8Bgo2oAvdZGDogjI+qqNKeZ+BbiCtjO2XiRv
+# pyDdFDoJTwJP0W9AcZA/VXtqeD3myMoi3rvD8yltg79j3U8qdFqygw8G+LoxggQN
+# MIIECQIBATCBkzB8MQswCQYDVQQGEwJVUzETMBEGA1UECBMKV2FzaGluZ3RvbjEQ
+# MA4GA1UEBxMHUmVkbW9uZDEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBvcmF0aW9u
+# MSYwJAYDVQQDEx1NaWNyb3NvZnQgVGltZS1TdGFtcCBQQ0EgMjAxMAITMwAAAiu7
+# AFD/TTuaoQABAAACKzANBglghkgBZQMEAgEFAKCCAUowGgYJKoZIhvcNAQkDMQ0G
+# CyqGSIb3DQEJEAEEMC8GCSqGSIb3DQEJBDEiBCAmWoicZ4EUZDqdxEF7pWzBzwaX
+# K8rIkcbc0B3tZmRKMjCB+gYLKoZIhvcNAQkQAi8xgeowgecwgeQwgb0EIHIOI/Q/
+# kFftYA+M2OY+1Bx3ajBD6/WDAtPT2vFkv25SMIGYMIGApH4wfDELMAkGA1UEBhMC
+# VVMxEzARBgNVBAgTCldhc2hpbmd0b24xEDAOBgNVBAcTB1JlZG1vbmQxHjAcBgNV
+# BAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlvbjEmMCQGA1UEAxMdTWljcm9zb2Z0IFRp
+# bWUtU3RhbXAgUENBIDIwMTACEzMAAAIruwBQ/007mqEAAQAAAiswIgQgiNCWem7F
+# TV2uF7kJIU90/NKjrdXqGBA1ZB7V9WXfluUwDQYJKoZIhvcNAQELBQAEggIANVs6
+# LpJosaplq+KbY8OZgQdtquacl8oEP6bW+g5J5Ckgl4cCS5q8fXk7RchKWdZ7zleN
+# HzU0u9bljeQZZ9EvMTzx46FNxdwCSKWsaY2CaqxQh5YUQLqCMnRe3doUdT0wEWPQ
+# M6AF2AG34wngcoNmk4lsXTBvqhGahumNXvwA7Z9WLLUsa0RDMwH4P/KDxihT91cf
+# FBFH4Xm1oEAklbdJOHZ2LQtypkxoxVrhrjsOjq/fGv7uuhaF1nBu6KFv4Jm/81Vn
+# QlUd0e+/P8Wv1zpiAyQee8qM7dAZMa6Su+3rlveN3qLqaPSUi/bZPkZ+3ESNoko5
+# WpT4N+C/4GJvzACEJdfJadp/OAO3ST/HhMnG7BX5tMOjVcxwSdCZtcxkhprUOuDL
+# og8XOETfRqmkgxZc49GFwmFOdKuu/joQGx/5uMarm5LfXksJoXpSo816MpXN5HYc
+# 7m/O8/g/ooBITilVlL3ac1tYjoHegIHwIe5ZkXb4BJiqjtA2LB1Kz2D+nCBMpJrj
+# Ry/Nzl55ZaSjsl1VgDFhOHc7SIeuO2Au5ELMz7pu3aCONO32OqKAN8ZMbql7+w/G
+# 8a5qTIIRIyspBNw+dEH3oO3sbARGYCRsRlVmXMeGV2xTQe4yVOLePjYT22fyaCBV
+# sF8My9Ewf70J1ZLnJzwDcliEH7/E3d2C7tqxSW0=
+# SIG # End signature block

@@ -55,7 +55,11 @@ runs:
     - name: Install BcContainerHelper module
       if: inputs.skip-container != 'true'
       run: |
-        Install-Module -Name BcContainerHelper -Scope CurrentUser -Force -AllowClobber -AllowPrerelease
+        $modulePath = Join-Path $env:RUNNER_TEMP "bcbench-powershell-modules"
+        New-Item -ItemType Directory -Path $modulePath -Force | Out-Null
+        Save-PSResource -Name BcContainerHelper -Prerelease -Repository PSGallery -Path $modulePath -TrustRepository -Quiet
+        $env:PSModulePath = "$modulePath;$env:PSModulePath"
+        "PSModulePath=$env:PSModulePath" | Out-File -FilePath $env:GITHUB_ENV -Append
       shell: pwsh
 
     - name: Resolve BC version for artifact cache
