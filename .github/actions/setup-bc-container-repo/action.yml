@@ -61,7 +61,7 @@ runs:
     - name: Install BcContainerHelper module
       if: inputs.skip-container != 'true'
       run: |
-        Install-Module -Name BcContainerHelper -Force -AllowClobber -AllowPrerelease
+        Install-Module -Name BcContainerHelper -Scope CurrentUser -Force -AllowClobber -AllowPrerelease
       shell: pwsh
 
     - name: Azure Login with OIDC for cloning internal repository
