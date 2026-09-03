@@ -30,7 +30,7 @@ jobs:
       category: "bug-fix"
 
   verify-build-and-tests:
-    runs-on: [GitHub-BCBench]
+    runs-on: [DOCKER001]
     needs: get-entries
     if: needs.get-entries.outputs.entries != '[]'
     environment:
